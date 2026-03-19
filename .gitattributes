@@ -1,0 +1,48 @@
+# Força LF para scripts shell (importante para Docker)
+*.sh text eol=lf
+docker-entrypoint.sh text eol=lf
+
+# Força LF para Dockerfile
+Dockerfile text eol=lf
+
+# Arquivos Python sempre com LF
+*.py text eol=lf
+
+# Arquivos de configuração
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.txt text eol=lf
+requirements.txt text eol=lf
+
+# Arquivos Markdown
+*.md text eol=lf
+
+# Arquivos que devem manter CRLF no Windows
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binários
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.mov binary
+*.mp4 binary
+*.mp3 binary
+*.flv binary
+*.fla binary
+*.swf binary
+*.gz binary
+*.zip binary
+*.7z binary
+*.ttf binary
+*.eot binary
+*.woff binary
+*.pyc binary
+*.pdf binary
+*.xls binary
+*.xlsx binary
+*.doc binary
+*.docx binary

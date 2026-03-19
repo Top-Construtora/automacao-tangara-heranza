@@ -1,0 +1,35 @@
+services:
+  tangara-automation:
+    build: .
+    container_name: tangara-automation
+    env_file:
+      - .env
+    environment:
+      # Display virtual para o Chrome
+      - DISPLAY=:1
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Montar diretórios locais para acesso aos arquivos baixados
+      - ./downloads:/app/downloads
+      - ./relatorios:/app/relatorios
+      - ./logs:/app/logs
+    # Para debugging, você pode descomentar as linhas abaixo
+    # stdin_open: true
+    # tty: true
+    # command: /bin/bash
+    
+  # Serviço opcional para visualizar o browser (útil para debugging)
+  # novnc:
+  #   image: theasp/novnc:latest
+  #   container_name: novnc
+  #   environment:
+  #     - DISPLAY_WIDTH=1920
+  #     - DISPLAY_HEIGHT=1080
+  #   ports:
+  #     - "8080:8080"
+  #   networks:
+  #     - automation-network
+
+networks:
+  automation-network:
+    driver: bridge
