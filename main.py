@@ -18,15 +18,15 @@ if hasattr(sys, '_tangara_running'):
     sys.exit(0)
 sys._tangara_running = True
 
-# Configurações de diretórios adaptadas para Docker
-BASE_DIR = '/app'
-DOWNLOAD_DIR = '/app/downloads'
-LOG_DIR = '/app/logs'
-RELATORIOS_DIR = '/app/relatorios'
-ENGENHARIA_DIR = '/app/relatorios/engenharia'
-SUPRIMENTOS_DIR = '/app/relatorios/suprimentos'
-SUPRIMENTOS_TANGARA_DIR = '/app/relatorios/suprimentos/tangara'
-ADMINISTRATIVO_DIR = '/app/relatorios/administrativo'
+# Configurações de diretórios adaptadas para Windows e Linux
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DOWNLOAD_DIR = os.path.join(BASE_DIR, 'downloads')
+LOG_DIR = os.path.join(BASE_DIR, 'logs')
+RELATORIOS_DIR = os.path.join(BASE_DIR, 'relatorios')
+ENGENHARIA_DIR = os.path.join(RELATORIOS_DIR, 'engenharia')
+SUPRIMENTOS_DIR = os.path.join(RELATORIOS_DIR, 'suprimentos')
+SUPRIMENTOS_TANGARA_DIR = os.path.join(SUPRIMENTOS_DIR, 'tangara')
+ADMINISTRATIVO_DIR = os.path.join(RELATORIOS_DIR, 'administrativo')
 
 # Credenciais - Usar variáveis de ambiente
 EMAIL = os.getenv('TANGARA_EMAIL')
@@ -35,7 +35,11 @@ EMAIL_PASSWORD = os.getenv('TANGARA_EMAIL_PASSWORD')
 # Criar diretórios se não existirem
 for directory in [LOG_DIR, DOWNLOAD_DIR, ENGENHARIA_DIR, SUPRIMENTOS_DIR, 
                   SUPRIMENTOS_TANGARA_DIR, ADMINISTRATIVO_DIR]:
-    os.makedirs(directory, exist_ok=True)
+    try:
+        os.makedirs(directory, exist_ok=True)
+    except PermissionError:
+        print(f"Aviso: Sem permissão para criar o diretório {directory}")
+        # Se falhar, tentamos continuar, talvez o diretório já exista ou será criado manualmente
 
 # Configuração do log
 nome_do_arquivo_de_log = f"log_tangara_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.txt"
@@ -43,10 +47,18 @@ caminho_do_arquivo_de_log = os.path.join(LOG_DIR, nome_do_arquivo_de_log)
 
 def adicionar_ao_log(mensagem, caminho_log=caminho_do_arquivo_de_log):
     """Adiciona mensagem ao arquivo de log com timestamp"""
-    with open(caminho_log, "a", encoding="utf-8") as log_file:
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_file.write(f"{timestamp} - {mensagem}\n")
-    print(f"{timestamp} - {mensagem}")  # Também imprimir no console
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    mensagem_formatada = f"{timestamp} - {mensagem}"
+    
+    print(mensagem_formatada)  # Sempre imprimir no console primeiro
+    
+    try:
+        with open(caminho_log, "a", encoding="utf-8") as log_file:
+            log_file.write(f"{mensagem_formatada}\n")
+    except PermissionError:
+        # Apenas ignoramos se não houver permissão de escrita no arquivo de log,
+        # pois a mensagem já foi impressa no console (stdout).
+        pass
 
 def mostrar_mensagem_conclusao():
     """Mostra mensagem de conclusão"""
@@ -138,12 +150,19 @@ def esperar_download_e_renomear(novo_nome_arquivo, diretorio_destino, wait_time=
         caminho_destino_final = os.path.join(diretorio_destino, f"{novo_nome_arquivo}{extensao}")
         
         if os.path.exists(caminho_destino_final):
-            os.remove(caminho_destino_final)
-            adicionar_ao_log(f"Arquivo existente removido: {caminho_destino_final}")
+            try:
+                os.remove(caminho_destino_final)
+                adicionar_ao_log(f"Arquivo existente removido: {caminho_destino_final}")
+            except PermissionError:
+                adicionar_ao_log(f"Aviso: Sem permissão para remover arquivo existente: {caminho_destino_final}")
             
-        shutil.move(arquivo_baixado, caminho_destino_final)
-        adicionar_ao_log(f"Arquivo '{os.path.basename(caminho_destino_final)}' salvo em '{diretorio_destino}'")
-        return True
+        try:
+            shutil.move(arquivo_baixado, caminho_destino_final)
+            adicionar_ao_log(f"Arquivo '{os.path.basename(caminho_destino_final)}' salvo em '{diretorio_destino}'")
+            return True
+        except PermissionError:
+            adicionar_ao_log(f"Erro de permissão: Não foi possível mover '{arquivo_baixado}' para '{caminho_destino_final}'")
+            return False
     else:
         adicionar_ao_log("Nenhum arquivo novo foi encontrado no tempo esperado.")
         return False
@@ -161,7 +180,10 @@ def converter_xls_para_xlsx_alternativo(arquivo_entrada):
         
         adicionar_ao_log(f"Arquivo convertido: {arquivo_saida}")
         if os.path.exists(arquivo_saida):
-            os.remove(arquivo_entrada)
+            try:
+                os.remove(arquivo_entrada)
+            except PermissionError:
+                adicionar_ao_log(f"Aviso: Sem permissão para remover {arquivo_entrada}")
             
     except Exception as e:
         adicionar_ao_log(f"Aviso: Não foi possível converter XLS para XLSX: {str(e)}")
@@ -205,7 +227,7 @@ def configurar_datas_js(driver, id_inicio, id_fim, data_inicio="01/01/2000", dat
 def capturar_screenshot(driver, nome_arquivo=None, pasta_log=None):
     # Definir diretório de logs
     if pasta_log is None:
-        pasta_log = os.getenv('LOG_DIR')
+        pasta_log = LOG_DIR
     
     # Gerar nome do arquivo com timestamp
     if nome_arquivo is None:
@@ -296,11 +318,11 @@ try:
     wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Colunas']"))).click()
     wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Mostrar todas']"))).click()
     
-    wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div/div[4]/main/div[1]/div[3]/div[2]/div/div[3]/div[2]/div/div[2]/div"))).click()
+    wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div/div[4]/main/div[1]/div[2]/div[3]/div/div[3]/div[2]/div/div[2]/div"))).click()
     optTodos = wait.until(EC.element_to_be_clickable((By.XPATH, "//li[text()='Todos']")))
     driver.execute_script("arguments[0].click();", optTodos)
     
-    data_inicial = wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@name='dtContratoInicial']")))
+    data_inicial = wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div/div[4]/main/div[1]/div[2]/div[1]/div/div[2]/div/div/div/div/form/div[1]/div[5]/div/div/div/button")))
     data_inicial.click()
     wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'MuiPickersCalendarHeader-switchViewButton')]"))).click()
     ano1 = wait.until(EC.presence_of_element_located((By.XPATH, "//button[text()='2000']")))
@@ -308,7 +330,7 @@ try:
     ano1.click()
     ActionChains(driver).send_keys(Keys.ESCAPE).perform()
     
-    data_final = wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@name='dtContratoFinal']")))
+    data_final = wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div/div[4]/main/div[1]/div[2]/div[1]/div/div[2]/div/div/div/div/form/div[1]/div[6]/div/div/div/button")))
     data_final.click()
     wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'MuiPickersCalendarHeader-switchViewButton')]"))).click()
     ano2 = wait.until(EC.presence_of_element_located((By.XPATH, "//button[text()='2050']")))
@@ -367,13 +389,13 @@ try:
     capturar_screenshot(driver, "analitico_de_apropriacoes.png", LOG_DIR)
     
     wait.until(EC.element_to_be_clickable((By.ID, 'visualizarButton'))).click()
-    esperar_download_e_renomear("Analítico de Apropriações por Obra EMISSAO - TOM BUENO - IN531 OBRA", ENGENHARIA_DIR, wait_time=120)
+    esperar_download_e_renomear("Analítico de Apropriações por Obra EMISSAO - HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
 
     # Gerar relatório VENCIMENTO
     Select(driver.find_element(By.NAME, 'analise.selecao')).select_by_value("vencimento")
     capturar_screenshot(driver, "analitico_de_apropriacoes_vencimento.png", LOG_DIR)
     wait.until(EC.element_to_be_clickable((By.ID, 'visualizarButton'))).click()
-    esperar_download_e_renomear("Analítico de Apropriações por Obra VENCIMENTO - TOM BUENO - IN531 OBRA", ENGENHARIA_DIR, wait_time=120)
+    esperar_download_e_renomear("Analítico de Apropriações por Obra VENCIMENTO - HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
 
     driver.switch_to.default_content()
 
@@ -420,7 +442,7 @@ try:
     
     capturar_screenshot(driver, "comparativo_orcado_x_comprometido.png", LOG_DIR)
     wait.until(EC.element_to_be_clickable((By.ID, 'visualizarButton'))).click()
-    esperar_download_e_renomear("OrcCom-TOM BUENO - IN531 OBRA", ENGENHARIA_DIR, wait_time=120)
+    esperar_download_e_renomear("OrcCom-HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
     driver.switch_to.default_content()
 
     # ------------------------------------------------- COMPARATIVO MEDIDO X COMPROMETIDO -----------------------------------------------
@@ -459,7 +481,7 @@ try:
     capturar_screenshot(driver, "comparativo_medido_x_comprometido.png", LOG_DIR)
     
     wait.until(EC.element_to_be_clickable((By.ID, 'visualizarButton'))).click()
-    esperar_download_e_renomear("MedCom-TOM BUENO - IN531 OBRA", ENGENHARIA_DIR, wait_time=120)
+    esperar_download_e_renomear("MedCom-HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
     driver.switch_to.default_content()
     
     # ------------------------------------------------- APROPRIAÇÕES DE INSUMOS ---------------------------------------------------------
@@ -479,7 +501,7 @@ try:
         pass
     
     wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, 'iFramePage')))
-    marcar_obras(driver, wait, "1")
+    marcar_obras(driver, wait, "0")
     configurar_datas_js(driver, "filter.dataInicialPeriodo", "filter.dataFinalPeriodo")
     Select(driver.find_element(By.ID, 'tpBDI')).select_by_value("N")
     Select(driver.find_element(By.ID, 'tpEncargosSociais')).select_by_value("N")
@@ -489,7 +511,7 @@ try:
     wait.until(EC.element_to_be_clickable((By.ID, "imprimirContratosPendentes"))).click()
     
     wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@type='submit' and @name='btFiltrar']"))).click()
-    esperar_download_e_renomear("ApIns-TOM BUENO - IN531 OBRA", ENGENHARIA_DIR, wait_time=120)
+    esperar_download_e_renomear("ApIns-HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
     driver.switch_to.default_content()
 
     # ------------------------------------------------- RELATÓRIOS SUPRIMENTOS ----------------------------------------------------------
@@ -507,14 +529,14 @@ try:
     except:
         pass
 
-    wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div/div/div[4]/main/div[1]/div[2]/form/div[2]/div[3]/div/div/input"))).click()
+    wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div/div[4]/main/div[1]/div[2]/div[1]/div/div[2]/div/div/div/div/form/div[1]/div[7]/div/div/div/button"))).click()
     wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'MuiPickersCalendarHeader-switchViewButton')]"))).click()
     ano1 = wait.until(EC.presence_of_element_located((By.XPATH, "//button[text()='2000']")))
     driver.execute_script("arguments[0].scrollIntoView(true);", ano1)
     ano1.click()
     ActionChains(driver).send_keys(Keys.ESCAPE).perform()
     
-    wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div/div/div[4]/main/div[1]/div[2]/form/div[2]/div[4]/div/div/input"))).click()
+    wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div/div[4]/main/div[1]/div[2]/div[1]/div/div[2]/div/div/div/div/form/div[1]/div[8]/div/div/div/button"))).click()
     wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'MuiPickersCalendarHeader-switchViewButton')]"))).click()
     ano2 = wait.until(EC.presence_of_element_located((By.XPATH, "//button[text()='2050']")))
     driver.execute_script("arguments[0].scrollIntoView(true);", ano2)
@@ -525,7 +547,7 @@ try:
     wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Mostrar todas']"))).click()
     ActionChains(driver).send_keys(Keys.ESCAPE).perform()
     
-    filtro = wait.until(EC.presence_of_element_located((By.XPATH, "/html/body/div/div/div[4]/main/div[1]/div[2]/div[2]/div/div[3]/div[2]/div/div[2]/div")))
+    filtro = wait.until(EC.presence_of_element_located((By.XPATH, "/html/body/div[1]/div/div[4]/main/div[1]/div[2]/div[2]/div/div[3]/div[2]/div/div[2]/div")))
     driver.execute_script("arguments[0].scrollIntoView(true);", filtro)
     filtro.click()
 
@@ -613,8 +635,11 @@ except Exception as e:
     if 'driver' in locals():
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         screenshot_path = os.path.join(LOG_DIR, f'error_screenshot_{timestamp}.png')
-        driver.save_screenshot(screenshot_path)
-        adicionar_ao_log(f"Screenshot do erro salvo em: {screenshot_path}")
+        try:
+            driver.save_screenshot(screenshot_path)
+            adicionar_ao_log(f"Screenshot do erro salvo em: {screenshot_path}")
+        except PermissionError:
+            adicionar_ao_log(f"Aviso: Sem permissão para salvar screenshot em: {screenshot_path}")
     mostrar_mensagem_erro()
     raise
 finally:

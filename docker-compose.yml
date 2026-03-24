@@ -2,6 +2,7 @@ services:
   tangara-automation:
     build: .
     container_name: tangara-automation
+    user: "${UID}:${GID}"
     env_file:
       - .env
     environment:
