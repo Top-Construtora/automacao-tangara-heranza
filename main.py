@@ -373,9 +373,6 @@ try:
     
     actions = ActionChains(driver)
 
-    configurar_datas_js(driver, "analise.periodoInicio", "analise.periodoFim")
-    time.sleep(2)
-    
     Select(wait.until(EC.visibility_of_element_located((By.NAME, 'analise.selecao')))).select_by_value("emissao")
 
     wait.until(EC.element_to_be_clickable((By.XPATH, "//td[img[@title='Abre a consulta']]"))).click()
@@ -383,6 +380,11 @@ try:
     wait.until(EC.element_to_be_clickable((By.ID, 'pbMarcarTodos'))).click()
     wait.until(EC.element_to_be_clickable((By.ID, 'pbSelecionar'))).click()
     driver.switch_to.parent_frame()
+
+    # IMPORTANTE: A marcação da Obra realiza um AJAX Refresh no formulário do Sienge, restabelecendo as datas para os padrões do projeto (ex: 2025)!
+    # Sendo assim, é OBRIGATÓRIO que o preenchimento da data aconteça DEPOIS da seleção da Obra para que o valor não seja perdido.
+    time.sleep(2) # Pausa para aguardar o AJAX repopular os campos do Sienge pós formConsulta
+    configurar_datas_js(driver, "analise.periodoInicio", "analise.periodoFim")
 
     wait.until(EC.element_to_be_clickable((By.ID, 'analise.imprimirObservacaoTitulo'))).click()
     wait.until(EC.element_to_be_clickable((By.ID, 'analise.imprimirDadosEmColunasNaoMescladas'))).click()
