@@ -316,7 +316,12 @@ try:
     
     # Configurar relatório
     wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Colunas']"))).click()
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Mostrar todas']"))).click()
+    try:
+        wait.until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Mostrar/Ocultar Todas']"))).click()
+    except Exception:
+        adicionar_ao_log("Fallback: clicando no input 'Mostrar/Ocultar Todas' diretamente.")
+        mostrar_todas_input = wait.until(EC.presence_of_element_located((By.XPATH, "//input[@name='Mostrar/Ocultar Todas']")))
+        driver.execute_script("arguments[0].click();", mostrar_todas_input)
     
     wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div/div[4]/main/div[1]/div[2]/div[3]/div/div[3]/div[2]/div/div[2]/div"))).click()
     optTodos = wait.until(EC.element_to_be_clickable((By.XPATH, "//li[text()='Todos']")))
@@ -546,7 +551,12 @@ try:
     ActionChains(driver).send_keys(Keys.ESCAPE).perform()
 
     wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Colunas']"))).click()
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Mostrar todas']"))).click()
+    try:
+        wait.until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Mostrar/Ocultar Todas']"))).click()
+    except Exception:
+        adicionar_ao_log("Fallback: clicando no input 'Mostrar/Ocultar Todas' diretamente.")
+        mostrar_todas_input = wait.until(EC.presence_of_element_located((By.XPATH, "//input[@name='Mostrar/Ocultar Todas']")))
+        driver.execute_script("arguments[0].click();", mostrar_todas_input)
     ActionChains(driver).send_keys(Keys.ESCAPE).perform()
     
     filtro = wait.until(EC.presence_of_element_located((By.XPATH, "/html/body/div[1]/div/div[4]/main/div[1]/div[2]/div[2]/div/div[3]/div[2]/div/div[2]/div")))
