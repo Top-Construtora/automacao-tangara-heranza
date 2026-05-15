@@ -266,7 +266,7 @@ try:
     
     adicionar_ao_log("Verificando tela de login adicional...")
     email_input_ms = WebDriverWait(driver, 10).until(
-        EC.visibility_of_element_located((By.XPATH, "//input[@name='username']"))
+        EC.visibility_of_element_located((By.XPATH, "//input[@name='email']"))
     )
     email_input_ms.send_keys(EMAIL)
     email_input_ms.send_keys(Keys.ENTER)
