@@ -280,11 +280,13 @@ try:
     adicionar_ao_log("Senha inserida na tela.")
     
     try:
-        alerta = driver.find_element(By.XPATH, "//div[contains(@class,'spwAlertaAviso')]")
-        if alerta.is_displayed():
-            driver.find_element(By.CLASS_NAME, "Button-prim").click()
-            adicionar_ao_log("Alerta de aviso fechado.")
-    except:
+        # Aguarda até 5 segundos para o alerta aparecer na tela (caso o usuário já esteja logado)
+        alerta = WebDriverWait(driver, 5).until(
+            EC.visibility_of_element_located((By.XPATH, "//div[contains(@class,'spwAlertaAviso')]"))
+        )
+        driver.find_element(By.CLASS_NAME, "Button-prim").click()
+        adicionar_ao_log("Alerta de aviso fechado.")
+    except Exception:
         adicionar_ao_log("Nenhum alerta de aviso encontrado.")
 
     # Espera o carregamento da página principal pós-login
