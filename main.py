@@ -608,38 +608,128 @@ try:
     esperar_download_e_renomear("RELATORIO DE RELACAO DE SOLICITACOES - TANGARA", SUPRIMENTOS_TANGARA_DIR)
     driver.switch_to.default_content()
 
-    # ------------------------------------------------- MAPA DE CONTROLE -----------------------------------------------------------------
-    adicionar_ao_log("Acessando Mapa de Controle...")
-    driver.get("https://guzattizompero.sienge.com.br/sienge/8/index.html#/common/page/4905")
-    
+    # ------------------------------------------------- PAINEL DE SUPRIMENTOS -----------------------------------------------------------------
+    adicionar_ao_log("Acessando Painel de Suprimentos...")
+    driver.get("https://guzattizompero.sienge.com.br/sienge/8/index.html#/suprimentos/compras/painel-de-compras")
+    time.sleep(5)
+
     try:
         wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/div/div/div[4]/button'))).click()
         time.sleep(2)
-    except:
+    except Exception:
         pass
-    
+
     try:
         wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Entendi')]"))).click()
-    except:
+    except Exception:
         pass
-    
-    wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, 'iFramePage')))
 
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//img[@title='Abre a consulta']"))).click()
-    wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "layerFormConsulta")))
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@type='checkbox' and @value='0']"))).click()
-    wait.until(EC.element_to_be_clickable((By.ID, 'pbSelecionar'))).click()
-    driver.switch_to.parent_frame()
-    
-    driver.execute_script("document.querySelector(\"input[name*='inicioPeriodo']\").value = '01/01/2000'; document.querySelector(\"input[name*='finalPeriodo']\").value = '01/01/2050';")
+    driver.switch_to.default_content()
 
-    wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div/form/table/tbody/tr[5]/td[2]/input"))).click()
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@value='Visualizar']"))).click()
-    
-    if esperar_download_e_renomear("MAPA DE CONTROLE - TANGARA", SUPRIMENTOS_TANGARA_DIR):
-        arquivo_xls = os.path.join(SUPRIMENTOS_TANGARA_DIR, "MAPA DE CONTROLE - TANGARA.xls")
-        if os.path.exists(arquivo_xls):
-             converter_xls_para_xlsx_alternativo(arquivo_xls)
+    # Configurar datas
+    data_inicial = wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@name='dataInicial']")))
+    data_inicial.click()
+    data_inicial.send_keys(Keys.CONTROL + "a")
+    data_inicial.send_keys("01/01/2000")
+    data_inicial.send_keys(Keys.ENTER)
+
+    data_final = wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@name='dataFinal']")))
+    data_final.click()
+    data_final.send_keys(Keys.CONTROL + "a")
+    data_final.send_keys("01/01/2050")
+    data_final.send_keys(Keys.ENTER)
+    time.sleep(1)
+
+    try:
+        wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[2]/div/div/div[4]/button"))).click()
+        adicionar_ao_log("Banner de notificação fechado.")
+    except Exception:
+        adicionar_ao_log("Nenhum banner de notificação encontrado.")
+
+    # Dispara consulta para listar todos os registros no período
+    try:
+        consultar_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(.)='Consultar' or normalize-space(.)='CONSULTAR']")))
+        driver.execute_script("arguments[0].click();", consultar_btn)
+        adicionar_ao_log("Botão 'Consultar' clicado.")
+    except Exception as e:
+        adicionar_ao_log(f"Aviso: botão 'Consultar' não encontrado ou já acionado: {e}")
+
+    time.sleep(10)
+    capturar_screenshot(driver, "painel_suprimentos_consulta")
+
+    # Mostrar/Ocultar Todas (mesmo padrão do habitat)
+    try:
+        try:
+            wait.until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Mostrar/Ocultar Todas']"))).click()
+            adicionar_ao_log("'Mostrar/Ocultar Todas' clicado.")
+        except Exception:
+            for trigger in ["COLUNAS", "Colunas", "FILTROS", "Filtros"]:
+                try:
+                    wait.until(EC.element_to_be_clickable((By.XPATH, f"//button[normalize-space(.)='{trigger}']"))).click()
+                    time.sleep(1)
+                    wait.until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Mostrar/Ocultar Todas']"))).click()
+                    adicionar_ao_log(f"'{trigger}' → 'Mostrar/Ocultar Todas' clicado.")
+                    driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+                    break
+                except Exception:
+                    continue
+            else:
+                adicionar_ao_log("AVISO: 'Mostrar/Ocultar Todas' não localizado.")
+    except Exception as e:
+        adicionar_ao_log(f"AVISO: erro em 'Mostrar/Ocultar Todas': {e}")
+    time.sleep(2)
+
+    # Troca paginação 25 → Todas
+    try:
+        dropdown_xpaths = [
+            "//div[contains(@class,'MuiTablePagination-select')]",
+            "//div[contains(@class,'MuiSelect-select') and normalize-space(.)='25']",
+            "//div[@role='button' and normalize-space(.)='25']",
+            "//*[normalize-space(.)='25' and (contains(@class,'Select') or contains(@class,'pagination') or @role='button')]",
+        ]
+        dropdown = None
+        for xp in dropdown_xpaths:
+            try:
+                dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, xp)))
+                break
+            except Exception:
+                continue
+        if dropdown is None:
+            raise RuntimeError("Dropdown de paginação '25' não localizado.")
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", dropdown)
+        try:
+            dropdown.click()
+        except Exception:
+            driver.execute_script("arguments[0].click();", dropdown)
+        time.sleep(1)
+        try:
+            wait.until(EC.element_to_be_clickable((By.XPATH, "//li[normalize-space(.)='Todas']"))).click()
+        except Exception:
+            adicionar_ao_log("Fallback: selecionando 'Todas' via JS.")
+            todas_option = wait.until(EC.presence_of_element_located((By.XPATH, "//li[contains(normalize-space(.),'Todas') or @data-value='-1']")))
+            driver.execute_script("arguments[0].click();", todas_option)
+        adicionar_ao_log("Paginação alterada para 'Todas'.")
+        time.sleep(10)
+        capturar_screenshot(driver, "painel_suprimentos_todas")
+    except Exception as e:
+        adicionar_ao_log(f"AVISO: falha ao trocar paginação 25 → Todas: {e}")
+
+    # Gera relatório em Excel
+    wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(.)='Gerar Relatório' or normalize-space(.)='GERAR RELATÓRIO']"))).click()
+    adicionar_ao_log("Botão 'Gerar Relatório' clicado.")
+    time.sleep(3)
+    capturar_screenshot(driver, "painel_suprimentos_modal_export")
+
+    wait.until(EC.element_to_be_clickable((By.XPATH, "//div[@role='presentation']//div[@role='combobox']"))).click()
+    excel_option = wait.until(EC.element_to_be_clickable((By.XPATH, "//div[@role='presentation']//li[@data-value='excel']")))
+    driver.execute_script("arguments[0].click();", excel_option)
+    time.sleep(2)
+    capturar_screenshot(driver, "painel_suprimentos_modal_excel")
+
+    export_button = wait.until(EC.presence_of_element_located((By.XPATH, "//button[normalize-space(.)='Exportar' or normalize-space(.)='EXPORTAR']")))
+    driver.execute_script("arguments[0].click();", export_button)
+
+    esperar_download_e_renomear("PAINEL DE SUPRIMENTOS - TANGARA", SUPRIMENTOS_TANGARA_DIR, wait_time=120)
     
     mostrar_mensagem_conclusao()
     
