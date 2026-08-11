@@ -248,6 +248,186 @@ def capturar_screenshot(driver, nome_arquivo=None, pasta_log=None):
         print(f"Erro ao capturar screenshot: {e}")
         return None
 
+# ------------------------------- Telas novas do Sienge (9.0.4 / MUI) ---------------------------------
+
+def fechar_modais_informativos(driver):
+    """Fecha os modais de novidade das telas novas ("Conheça a nova tela..." →
+    Fechar; Ajuda Contextual → Entendi). Sem isso o modal intercepta os cliques."""
+    for texto in ("Fechar", "FECHAR", "Entendi", "ENTENDI"):
+        for botao in driver.find_elements(By.XPATH, f"//button[normalize-space(.)='{texto}']"):
+            try:
+                if botao.is_displayed():
+                    botao.click()
+                    adicionar_ao_log(f"Modal informativo fechado ('{texto}').")
+                    time.sleep(1)
+            except Exception:
+                pass
+
+def configurar_datas_mui(driver, wait, name_inicial, name_final,
+                         data_inicio="01/01/2000", data_fim="01/01/2050"):
+    """Digita o período nos inputs de data das telas novas (MUI).
+
+    O primeiro campo usa espera longa: a tela pode ficar 30s+ em "Carregando..."
+    antes de montar o formulário."""
+    WebDriverWait(driver, 90).until(EC.element_to_be_clickable(
+        (By.XPATH, f"//input[@name='{name_inicial}']")))
+    fechar_modais_informativos(driver)
+    for name, valor in ((name_inicial, data_inicio), (name_final, data_fim)):
+        campo = wait.until(EC.element_to_be_clickable((By.XPATH, f"//input[@name='{name}']")))
+        campo.click()
+        campo.send_keys(Keys.CONTROL + "a")
+        campo.send_keys(valor)
+        campo.send_keys(Keys.ENTER)
+    adicionar_ao_log(f"Datas configuradas: {data_inicio} a {data_fim}")
+    time.sleep(1)
+
+def mostrar_todas_colunas(driver, wait, botao_colunas=True, fechar_painel=False):
+    """Abre o menu Colunas (quando existir) e clica em 'Mostrar/Ocultar Todas'.
+    Cobre a tela antiga (span exato) e a nova (variações de caixa)."""
+    if botao_colunas:
+        for rotulo in ("Colunas", "COLUNAS"):
+            try:
+                WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+                    (By.XPATH, f"//button[normalize-space(.)='{rotulo}']"))).click()
+                time.sleep(1)
+                break
+            except Exception:
+                continue
+    xpaths = [
+        "//span[contains(normalize-space(.),'Mostrar/Ocultar')]",
+        "//*[contains(normalize-space(text()),'Mostrar/ocultar todas')]",
+        "//input[@name='Mostrar/Ocultar Todas']",
+    ]
+    for xp in xpaths:
+        elementos = [e for e in driver.find_elements(By.XPATH, xp) if e.is_displayed()]
+        if elementos:
+            driver.execute_script("arguments[0].click();", elementos[0])
+            adicionar_ao_log("'Mostrar/Ocultar Todas' aplicado.")
+            break
+    else:
+        adicionar_ao_log("AVISO: 'Mostrar/Ocultar Todas' não localizado.")
+    if fechar_painel:
+        driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+        time.sleep(1)
+
+def selecionar_paginacao_todas(driver, wait, rotulo="Todas", rotulos_alternativos=("Todos",)):
+    """Troca a paginação do grid de 25 para 'Todas'/'Todos'."""
+    dropdown_xpaths = [
+        "//div[contains(@class,'MuiTablePagination-select')]",
+        "//div[contains(@class,'MuiSelect-select') and normalize-space(.)='25']",
+        "//div[@role='button' and normalize-space(.)='25']",
+        "//*[normalize-space(.)='25' and (contains(@class,'Select') or contains(@class,'pagination') or @role='button')]",
+    ]
+    dropdown = None
+    for xp in dropdown_xpaths:
+        try:
+            dropdown = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, xp)))
+            break
+        except Exception:
+            continue
+    if dropdown is None:
+        raise TimeoutException("dropdown de paginação não localizado")
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", dropdown)
+    try:
+        dropdown.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", dropdown)
+    time.sleep(1)
+    for cand in (rotulo, *rotulos_alternativos):
+        try:
+            WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+                (By.XPATH, f"//li[normalize-space(.)='{cand}']"))).click()
+            adicionar_ao_log(f"Paginação alterada para '{cand}'.")
+            return
+        except Exception:
+            continue
+    opcao = wait.until(EC.presence_of_element_located(
+        (By.XPATH, f"//li[contains(normalize-space(.),'{rotulo}') or @data-value='-1']")))
+    driver.execute_script("arguments[0].click();", opcao)
+    adicionar_ao_log(f"Paginação alterada para '{rotulo}' (JS).")
+
+# Status do MuiDataGrid:
+#  - carregadas: linhas já materializadas (altura do virtualScroller / altura da linha);
+#  - total: total exibido no rodapé de paginação ("1–18787 de 18787");
+#  - carregando: spinner de loading visível.
+_JS_STATUS_DATAGRID = r"""
+const vs = document.querySelector('.MuiDataGrid-virtualScroller');
+const row = document.querySelector('.MuiDataGrid-row');
+const foot = document.querySelector('.MuiTablePagination-displayedRows');
+const rh = (row && row.offsetHeight) ? row.offsetHeight : 36;
+const carregadas = vs ? Math.round((vs.scrollHeight || 0) / rh) : 0;
+let total = null;
+if (foot) {
+    const m = foot.textContent.replace(/[.\s ]/g, '').match(/de([0-9]+)/i);
+    if (m) total = parseInt(m[1], 10);
+}
+const spinner = document.querySelector(
+    '.MuiDataGrid-root [role="progressbar"], .MuiDataGrid-loadingOverlay, '
+    + '.MuiDataGrid-overlay .MuiCircularProgress-root'
+);
+const carregando = !!(spinner && spinner.offsetParent !== null);
+return {carregadas: carregadas, total: total, carregando: carregando};
+"""
+
+def esperar_datagrid_carregar_todas(driver, timeout=300):
+    """Após selecionar 'Todas' na paginação, o grid busca TODAS as linhas em um
+    único fetch assíncrono. O 'Gerar Relatório' exporta só as linhas já
+    materializadas — exportar antes do fim gera relatório truncado."""
+    deadline = time.time() + timeout
+    carregadas = total = None
+    proximo_log = 0.0
+    while time.time() < deadline:
+        try:
+            status = driver.execute_script(_JS_STATUS_DATAGRID)
+            carregadas = status.get("carregadas")
+            total = status.get("total")
+            carregando = status.get("carregando")
+        except Exception:
+            carregadas = total = None
+            carregando = True
+        if total and carregadas and carregadas >= total * 0.99 and not carregando:
+            adicionar_ao_log(f"DataGrid carregou {carregadas}/{total} linhas.")
+            return carregadas, total
+        if time.time() >= proximo_log:
+            adicionar_ao_log(f"Aguardando DataGrid carregar linhas... {carregadas}/{total} "
+                             f"(carregando={carregando})")
+            proximo_log = time.time() + 15
+        time.sleep(1)
+    adicionar_ao_log(f"AVISO: timeout ({timeout}s) esperando o DataGrid "
+                     f"(materializadas={carregadas}, total={total}). Exportação pode sair truncada.")
+    return carregadas, total
+
+def exportar_excel_mui(driver, wait):
+    """Gerar Relatório → formato excel → Exportar (dispara o download).
+
+    O combobox e o botão são procurados DENTRO do diálogo: '//div[@role=...
+    presentation]//div[@role=combobox]' também casa com o select de paginação
+    do grid, que fica atrás do modal (clique interceptado)."""
+    wait.until(EC.element_to_be_clickable((By.XPATH,
+        "//button[normalize-space(.)='Gerar Relatório' or normalize-space(.)='GERAR RELATÓRIO']"))).click()
+    adicionar_ao_log("Botão 'Gerar Relatório' clicado.")
+    time.sleep(3)
+    combo_xpaths = [
+        "//div[@role='dialog']//div[@role='combobox']",
+        "//div[@role='presentation']//div[@role='combobox'][not(contains(@class,'MuiTablePagination-select'))]",
+    ]
+    for xp in combo_xpaths:
+        try:
+            wait.until(EC.element_to_be_clickable((By.XPATH, xp))).click()
+            break
+        except Exception:
+            continue
+    else:
+        raise TimeoutException("combobox de formato do relatório não localizado")
+    opcao_excel = wait.until(EC.element_to_be_clickable((By.XPATH, "//li[@data-value='excel']")))
+    driver.execute_script("arguments[0].click();", opcao_excel)
+    time.sleep(2)
+    exportar = wait.until(EC.presence_of_element_located((By.XPATH,
+        "//div[@role='dialog']//button[normalize-space(.)='Exportar' or normalize-space(.)='EXPORTAR']"
+        " | //button[normalize-space(.)='Exportar' or normalize-space(.)='EXPORTAR']")))
+    driver.execute_script("arguments[0].click();", exportar)
+    adicionar_ao_log("Botão 'Exportar' clicado.")
+
 # -----------------------------------------------------------------------------------------------------------------------------------
 # ------------------------------------------------- MAIN ----------------------------------------------------------------------------
 # -----------------------------------------------------------------------------------------------------------------------------------
@@ -296,70 +476,50 @@ try:
     janela_original = driver.current_window_handle
     
     # ------------------------------------------------- CADASTRO DE CONTRATOS -----------------------------------------------------------
+    # O Sienge trocou esta tela em 2026 (9.0.4): modais de novidade na entrada,
+    # datas por input[name], painel de colunas novo e export client-side (só as
+    # linhas materializadas no grid). Fluxo: fechar modais → datas 2000→2050 →
+    # mostrar todas as colunas → Consultar → paginação 'Todas' → esperar a grid
+    # materializar tudo → Gerar Relatório → excel.
     adicionar_ao_log("Iniciando extração de Cadastro de Contratos...")
     driver.get("https://guzattizompero.sienge.com.br/sienge/8/index.html#/suprimentos/contratos-e-medicoes/contratos/cadastros")
-    time.sleep(5)
-    
+    time.sleep(8)
+
     # Use ActionChains to send ESCAPE key to the active element
     actions = ActionChains(driver)
     actions.send_keys(Keys.ESCAPE)
     actions.perform()
-    
+
     try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/div/div/div[4]/button'))).click()
-        time.sleep(2)
-    except:
-        pass
-    
-    try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Entendi')]"))).click()
-    except:
-        pass
-    
-    # Configurar relatório
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Colunas']"))).click()
-    try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Mostrar/Ocultar Todas']"))).click()
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/div/div/div[4]/button'))).click()
+        time.sleep(1)
     except Exception:
-        adicionar_ao_log("Fallback: clicando no input 'Mostrar/Ocultar Todas' diretamente.")
-        mostrar_todas_input = wait.until(EC.presence_of_element_located((By.XPATH, "//input[@name='Mostrar/Ocultar Todas']")))
-        driver.execute_script("arguments[0].click();", mostrar_todas_input)
-    
-    wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div/div[4]/main/div[1]/div[2]/div[3]/div/div[3]/div[2]/div/div[2]/div"))).click()
-    optTodos = wait.until(EC.element_to_be_clickable((By.XPATH, "//li[text()='Todos']")))
-    driver.execute_script("arguments[0].click();", optTodos)
-    
-    data_inicial = wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div/div[4]/main/div[1]/div[2]/div[1]/div/div[2]/div/div/div/div/form/div[1]/div[5]/div/div/div/button")))
-    data_inicial.click()
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'MuiPickersCalendarHeader-switchViewButton')]"))).click()
-    ano1 = wait.until(EC.presence_of_element_located((By.XPATH, "//button[text()='2000']")))
-    driver.execute_script("arguments[0].scrollIntoView(true);", ano1)
-    ano1.click()
-    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-    
-    data_final = wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div/div[4]/main/div[1]/div[2]/div[1]/div/div[2]/div/div/div/div/form/div[1]/div[6]/div/div/div/button")))
-    data_final.click()
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'MuiPickersCalendarHeader-switchViewButton')]"))).click()
-    ano2 = wait.until(EC.presence_of_element_located((By.XPATH, "//button[text()='2050']")))
-    driver.execute_script("arguments[0].scrollIntoView(true);", ano2)
-    ano2.click()
-    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-    
-    btConsultar = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Consultar']")))
+        pass
+
+    fechar_modais_informativos(driver)
+
+    # Configurar relatório
+    configurar_datas_mui(driver, wait, "dtContratoInicial", "dtContratoFinal")
+    mostrar_todas_colunas(driver, wait, botao_colunas=True, fechar_painel=True)
+
+    btConsultar = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(.)='Consultar' or normalize-space(.)='CONSULTAR']")))
     driver.execute_script("arguments[0].click();", btConsultar)
     time.sleep(5)
-    
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Gerar Relatório']"))).click()
-    
+
+    # O export sai só com as linhas visíveis — paginação 'Todas' + espera real.
+    try:
+        selecionar_paginacao_todas(driver, wait, rotulo="Todas", rotulos_alternativos=("Todos",))
+        esperar_datagrid_carregar_todas(driver)
+        time.sleep(1)
+    except Exception as e:
+        adicionar_ao_log(f"AVISO: falha ao trocar paginação para 'Todas': {e}")
+
+    capturar_screenshot(driver, "cadastro_contratos_grid")
+
     # Exportar para Excel
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//div[@role='presentation']//div[@role='combobox']"))).click()
-    excel_option = wait.until(EC.element_to_be_clickable((By.XPATH, "//li[@data-value='excel']")))
-    driver.execute_script("arguments[0].click();", excel_option)
-    
-    export_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Exportar']")))
-    driver.execute_script("arguments[0].click();", export_button)
-    
-    esperar_download_e_renomear("cadastro de contratos", ADMINISTRATIVO_DIR)
+    exportar_excel_mui(driver, wait)
+
+    esperar_download_e_renomear("cadastro de contratos", ADMINISTRATIVO_DIR, wait_time=120)
     
     # ------------------------------------------------- RELATÓRIOS ENGENHARIA -----------------------------------------------------------
     # Analítico de Apropriações por Obra
