@@ -119,8 +119,31 @@ def criar_driver():
         adicionar_ao_log(f"Erro ao criar driver: {str(e)}")
         raise
 
-def esperar_download_e_renomear(novo_nome_arquivo, diretorio_destino, wait_time=60):
-    """Espera um novo arquivo ser baixado e o renomeia."""
+# Aviso de validação inline do Sienge legado (classe + regex). Ex.: 'Informação:
+# A unidade construtiva 1 não possui estrutura do planejamento...'. A classe
+# spwAlertaAviso restringe ao aviso de verdade (rótulos de form não a usam).
+_JS_AVISO_VALIDACAO = r"""
+const el = document.querySelector('.spwAlertaAviso, .spwAlertaErro');
+if (!el || el.offsetParent === null) return null;
+const t = (el.innerText || '').replace(/\s+/g, ' ').trim();
+return /\binformação\b|\batenção\b|não possui|só poderá|não há registros|não foi possível/i.test(t) ? t : null;
+"""
+
+def texto_aviso_validacao(driver):
+    """Texto do aviso de validação visível (spwAlertaAviso/Erro), ou None."""
+    try:
+        return driver.execute_script(_JS_AVISO_VALIDACAO)
+    except Exception:
+        return None
+
+
+def esperar_download_e_renomear(novo_nome_arquivo, diretorio_destino, wait_time=60, cancelar_se=None):
+    """Espera um novo arquivo ser baixado e o renomeia.
+
+    `cancelar_se` é um predicado opcional consultado a cada volta do loop: quando
+    fica verdadeiro (ex.: o Sienge exibiu aviso de que o relatório não virá),
+    a espera aborta na hora em vez de queimar o timeout inteiro.
+    """
     adicionar_ao_log(f"Aguardando download do arquivo '{novo_nome_arquivo}'...")
     inicio = time.time()
     arquivos_antes = set(os.listdir(DOWNLOAD_DIR))
@@ -146,6 +169,10 @@ def esperar_download_e_renomear(novo_nome_arquivo, diretorio_destino, wait_time=
     arquivo_baixado = None
 
     while time.time() < fim_espera:
+        if cancelar_se is not None and cancelar_se():
+            adicionar_ao_log(f"Espera por '{novo_nome_arquivo}' cancelada: a página indicou que o relatório não será gerado.")
+            return False
+
         arquivos_depois = set(os.listdir(DOWNLOAD_DIR))
         novos_arquivos = arquivos_depois - arquivos_antes
 
@@ -196,6 +223,25 @@ def esperar_download_e_renomear(novo_nome_arquivo, diretorio_destino, wait_time=
         adicionar_ao_log("Nenhum arquivo novo foi encontrado no tempo esperado.")
         return False
 
+
+def baixar_relatorio_ou_falhar(driver, novo_nome_arquivo, diretorio_destino, wait_time=120):
+    """Espera o download (abortando cedo se o Sienge exibir aviso) e move o
+    arquivo. Sem arquivo = exceção: o módulo não pode fechar como OK com o BI
+    ficando sem dado novo — antes, o retorno era descartado e um aviso do
+    Sienge virava 'sucesso' silencioso com 120s de espera vazia.
+    """
+    baixou = esperar_download_e_renomear(
+        novo_nome_arquivo, diretorio_destino, wait_time=wait_time,
+        cancelar_se=lambda: texto_aviso_validacao(driver) is not None)
+    if baixou:
+        return
+    msg = texto_aviso_validacao(driver)
+    if msg:
+        adicionar_ao_log(f"AVISO do Sienge: {msg}")
+        raise RuntimeError(f"Sienge não gerou '{novo_nome_arquivo}': {msg}")
+    raise TimeoutException(f"download de '{novo_nome_arquivo}' não foi encontrado")
+
+
 def converter_xls_para_xlsx_alternativo(arquivo_entrada):
     """Conversão alternativa de XLS para XLSX usando pandas"""
     try:
@@ -229,19 +275,27 @@ def fechar_janela(driver, janela_original):
     except TimeoutException:
         adicionar_ao_log("Nenhuma janela popup para fechar.")
 
-def marcar_obras(driver, wait, valor):
-    """Marca obra específica no formulário"""
+def marcar_obras(driver, wait, codigo):
+    """Marca a obra pelo CÓDIGO (prefixo do texto da linha na consulta).
+
+    O value do radio rowSelect é um índice de linha: muda quando o cadastro de
+    obras muda e a ordem DIFERE entre telas (em 14/08/2026 a consulta da 2138
+    listava 22001-INCORPORAÇÃO na linha 0 e 33001-OBRA na linha 1, enquanto a
+    da 627 só tinha 33001 — o ApIns saía com a INCORPORAÇÃO no lugar da OBRA).
+    Falha em achar o código propaga como exceção: seguir sem marcar exportaria
+    a obra anteriormente selecionada sob um nome plausível.
+    """
     wait.until(EC.element_to_be_clickable((By.XPATH, "//td[img[@title='Abre a consulta']]"))).click()
 
     wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "layerFormConsulta")))
 
     try:
-        elemento = wait.until(EC.presence_of_element_located((By.XPATH, f"//input[@type='radio' and @name='rowSelect' and @value='{valor}']")))
+        elemento = wait.until(EC.presence_of_element_located((By.XPATH,
+            f'//input[@type="radio" and @name="rowSelect"]'
+            f'[starts-with(normalize-space(ancestor::tr[1]), "{codigo} ")]')))
         elemento.click()
         wait.until(EC.element_to_be_clickable((By.ID, 'pbSelecionar'))).click()
-        adicionar_ao_log("Obra marcada com sucesso")
-    except Exception as e:
-        adicionar_ao_log(f"Erro ao tentar marcar o input: {e}")
+        adicionar_ao_log(f"Obra {codigo} marcada com sucesso")
     finally:
         driver.switch_to.parent_frame()
 
@@ -443,6 +497,32 @@ def esperar_datagrid_carregar_todas(driver, timeout=300):
                      f"(materializadas={carregadas}, total={total}). Exportação pode sair truncada.")
     return carregadas, total
 
+def esperar_datagrid_pronto(driver, timeout=60):
+    """Espera a primeira carga do MuiDataGrid (spinner/overlay ausente).
+
+    Diferente de esperar_datagrid_carregar_todas: serve para o pós-Consultar,
+    quando a paginação ainda está em 25 e 'todas as linhas' nunca materializam.
+    """
+    def _carregando():
+        try:
+            return driver.execute_script(
+                "const g=document.querySelector('.MuiDataGrid-root');"
+                "if(!g) return true;"
+                "return !!g.querySelector('.MuiLinearProgress-root')"
+                " || g.getAttribute('aria-busy')==='true'"
+                " || !!g.querySelector('.MuiDataGrid-loadingOverlay');")
+        except Exception:
+            return True
+    fim = time.time() + timeout
+    while time.time() < fim:
+        if not _carregando():
+            time.sleep(1)
+            return True
+        time.sleep(0.5)
+    adicionar_ao_log(f"AVISO: DataGrid não ficou pronto em {timeout}s após a consulta.")
+    return False
+
+
 def exportar_excel_mui(driver, wait):
     """Gerar Relatório → formato excel → Exportar (dispara o download).
 
@@ -452,25 +532,57 @@ def exportar_excel_mui(driver, wait):
     wait.until(EC.element_to_be_clickable((By.XPATH,
         "//button[normalize-space(.)='Gerar Relatório' or normalize-space(.)='GERAR RELATÓRIO']"))).click()
     adicionar_ao_log("Botão 'Gerar Relatório' clicado.")
-    time.sleep(3)
-    combo_xpaths = [
-        "//div[@role='dialog']//div[@role='combobox']",
-        "//div[@role='presentation']//div[@role='combobox'][not(contains(@class,'MuiTablePagination-select'))]",
-    ]
-    for xp in combo_xpaths:
-        try:
-            wait.until(EC.element_to_be_clickable((By.XPATH, xp))).click()
-            break
-        except Exception:
-            continue
-    else:
+    time.sleep(1)
+
+    # Varre apenas dialogs VISÍVEIS: pode haver .MuiDialog-container ocultos no
+    # DOM e um XPath first-match trava neles. O click no combobox é nativo — o
+    # Select do MUI abre no mousedown, que um click() via JS não dispara.
+    def _no_dialogo_visivel(seletor):
+        return driver.execute_script("""
+            const seletor = arguments[0];
+            for (const d of document.querySelectorAll('.MuiDialog-container, [role="dialog"]')) {
+                if (d.offsetParent === null) continue;
+                for (const el of d.querySelectorAll(seletor)) {
+                    if (el.offsetParent !== null) return el;
+                }
+            }
+            return null;
+        """, seletor)
+
+    fim = time.time() + 20
+    combobox = None
+    while time.time() < fim and combobox is None:
+        combobox = _no_dialogo_visivel("[role='combobox'], .MuiSelect-select")
+        if combobox is None:
+            time.sleep(0.5)
+    if combobox is None:
         raise TimeoutException("combobox de formato do relatório não localizado")
-    opcao_excel = wait.until(EC.element_to_be_clickable((By.XPATH, "//li[@data-value='excel']")))
+    try:
+        combobox.click()
+    except Exception:
+        driver.execute_script(
+            "arguments[0].dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));", combobox)
+
+    opcao_excel = wait.until(EC.presence_of_element_located((By.XPATH, "//li[@data-value='excel']")))
     driver.execute_script("arguments[0].click();", opcao_excel)
-    time.sleep(2)
-    exportar = wait.until(EC.presence_of_element_located((By.XPATH,
-        "//div[@role='dialog']//button[normalize-space(.)='Exportar' or normalize-space(.)='EXPORTAR']"
-        " | //button[normalize-space(.)='Exportar' or normalize-space(.)='EXPORTAR']")))
+    time.sleep(1)
+
+    fim = time.time() + 20
+    exportar = None
+    while time.time() < fim and exportar is None:
+        exportar = driver.execute_script("""
+            for (const d of document.querySelectorAll('.MuiDialog-container, [role="dialog"]')) {
+                if (d.offsetParent === null) continue;
+                for (const b of d.querySelectorAll('button')) {
+                    if (/^exportar$/i.test((b.textContent || '').trim())) return b;
+                }
+            }
+            return null;
+        """)
+        if exportar is None:
+            time.sleep(0.5)
+    if exportar is None:
+        raise TimeoutException("botão 'Exportar' não localizado no modal")
     driver.execute_script("arguments[0].click();", exportar)
     adicionar_ao_log("Botão 'Exportar' clicado.")
 
@@ -717,7 +829,7 @@ def modulo_cadastro_contratos(driver, wait):
     """
     adicionar_ao_log("Iniciando extração de Cadastro de Contratos...")
     driver.get("https://guzattizompero.sienge.com.br/sienge/8/index.html#/suprimentos/contratos-e-medicoes/contratos/cadastros")
-    time.sleep(8)
+    time.sleep(3)
     verificar_acesso(driver, "Cadastro de Contratos", espera=0)
 
     # Use ActionChains to send ESCAPE key to the active element
@@ -731,7 +843,7 @@ def modulo_cadastro_contratos(driver, wait):
 
     btConsultar = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(.)='Consultar' or normalize-space(.)='CONSULTAR']")))
     driver.execute_script("arguments[0].click();", btConsultar)
-    time.sleep(5)
+    time.sleep(2)
 
     # O export sai só com as linhas visíveis — paginação 'Todas' + espera real.
     try:
@@ -746,7 +858,7 @@ def modulo_cadastro_contratos(driver, wait):
     # Exportar para Excel
     exportar_excel_mui(driver, wait)
 
-    esperar_download_e_renomear("cadastro de contratos", ADMINISTRATIVO_DIR, wait_time=120)
+    baixar_relatorio_ou_falhar(driver, "cadastro de contratos", ADMINISTRATIVO_DIR, wait_time=120)
 
 
 def modulo_analitico_apropriacoes(driver, wait):
@@ -776,13 +888,13 @@ def modulo_analitico_apropriacoes(driver, wait):
     capturar_screenshot(driver, "analitico_de_apropriacoes.png", LOG_DIR)
 
     wait.until(EC.element_to_be_clickable((By.ID, 'visualizarButton'))).click()
-    esperar_download_e_renomear("Analítico de Apropriações por Obra EMISSAO - HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
+    baixar_relatorio_ou_falhar(driver, "Analítico de Apropriações por Obra EMISSAO - HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
 
     # Gerar relatório VENCIMENTO
     Select(driver.find_element(By.NAME, 'analise.selecao')).select_by_value("vencimento")
     capturar_screenshot(driver, "analitico_de_apropriacoes_vencimento.png", LOG_DIR)
     wait.until(EC.element_to_be_clickable((By.ID, 'visualizarButton'))).click()
-    esperar_download_e_renomear("Analítico de Apropriações por Obra VENCIMENTO - HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
+    baixar_relatorio_ou_falhar(driver, "Analítico de Apropriações por Obra VENCIMENTO - HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
 
     driver.switch_to.default_content()
 
@@ -796,7 +908,7 @@ def modulo_orcado_comprometido(driver, wait):
 
     wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, 'iFramePage')))
 
-    marcar_obras(driver, wait, "0")
+    marcar_obras(driver, wait, "33001")
 
     configurar_datas_js(driver, "analise.periodoInicio", "analise.periodoFim")
 
@@ -822,7 +934,7 @@ def modulo_orcado_comprometido(driver, wait):
 
     capturar_screenshot(driver, "comparativo_orcado_x_comprometido.png", LOG_DIR)
     wait.until(EC.element_to_be_clickable((By.ID, 'visualizarButton'))).click()
-    esperar_download_e_renomear("OrcCom-HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
+    baixar_relatorio_ou_falhar(driver, "OrcCom-HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
     driver.switch_to.default_content()
 
 
@@ -835,7 +947,7 @@ def modulo_medido_comprometido(driver, wait):
 
     wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, 'iFramePage')))
 
-    marcar_obras(driver, wait, "0")
+    marcar_obras(driver, wait, "33001")
 
     configurar_datas_js(driver, "analise.periodoInicio", "analise.periodoFim")
     Select(driver.find_element(By.NAME, 'analise.selecao')).select_by_value("emissao")
@@ -854,7 +966,7 @@ def modulo_medido_comprometido(driver, wait):
     capturar_screenshot(driver, "comparativo_medido_x_comprometido.png", LOG_DIR)
 
     wait.until(EC.element_to_be_clickable((By.ID, 'visualizarButton'))).click()
-    esperar_download_e_renomear("MedCom-HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
+    baixar_relatorio_ou_falhar(driver, "MedCom-HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
     driver.switch_to.default_content()
 
 
@@ -866,7 +978,7 @@ def modulo_apropriacoes_insumos(driver, wait):
     fechar_popups(driver)
 
     wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, 'iFramePage')))
-    marcar_obras(driver, wait, "0")
+    marcar_obras(driver, wait, "33001")
     configurar_datas_js(driver, "filter.dataInicialPeriodo", "filter.dataFinalPeriodo")
     Select(driver.find_element(By.ID, 'tpBDI')).select_by_value("N")
     Select(driver.find_element(By.ID, 'tpEncargosSociais')).select_by_value("N")
@@ -876,7 +988,7 @@ def modulo_apropriacoes_insumos(driver, wait):
     wait.until(EC.element_to_be_clickable((By.ID, "imprimirContratosPendentes"))).click()
 
     wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@type='submit' and @name='btFiltrar']"))).click()
-    esperar_download_e_renomear("ApIns-HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
+    baixar_relatorio_ou_falhar(driver, "ApIns-HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
     driver.switch_to.default_content()
 
 
@@ -924,7 +1036,7 @@ def modulo_pedidos_compra(driver, wait):
     # Consultar: antes dele o grid pode estar vazio (sem total no rodapé) e a
     # espera giraria o timeout inteiro à toa.
     selecionar_paginacao_todas(driver, wait, rotulo="Todas", rotulos_alternativos=("Todos",))
-    time.sleep(15)
+    time.sleep(2)
 
     wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(.)='Consultar']"))).click()
     esperar_datagrid_carregar_todas(driver)
@@ -932,7 +1044,7 @@ def modulo_pedidos_compra(driver, wait):
     # Gerar Relatório → excel → Exportar (ancorado no diálogo)
     exportar_excel_mui(driver, wait)
 
-    esperar_download_e_renomear("RELAÇÃO DE PEDIDOS DE COMPRAS - TANGARA", SUPRIMENTOS_TANGARA_DIR, wait_time=180)
+    baixar_relatorio_ou_falhar(driver, "RELAÇÃO DE PEDIDOS DE COMPRAS - TANGARA", SUPRIMENTOS_TANGARA_DIR, wait_time=180)
 
 
 def modulo_relacao_solicitacoes(driver, wait):
@@ -955,7 +1067,7 @@ def modulo_relacao_solicitacoes(driver, wait):
     Select(wait.until(EC.visibility_of_element_located((By.NAME, 'filterRelacao.printCotadosReservas')))).select_by_value("S")
 
     wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@value='Visualizar']"))).click()
-    esperar_download_e_renomear("RELATORIO DE RELACAO DE SOLICITACOES - TANGARA", SUPRIMENTOS_TANGARA_DIR)
+    baixar_relatorio_ou_falhar(driver, "RELATORIO DE RELACAO DE SOLICITACOES - TANGARA", SUPRIMENTOS_TANGARA_DIR)
     driver.switch_to.default_content()
 
 
@@ -963,7 +1075,7 @@ def modulo_painel_suprimentos(driver, wait):
     """Painel de Suprimentos (Suprimentos)."""
     adicionar_ao_log("Acessando Painel de Suprimentos...")
     driver.get("https://guzattizompero.sienge.com.br/sienge/8/index.html#/suprimentos/compras/painel-de-compras")
-    time.sleep(5)
+    time.sleep(2)
     verificar_acesso(driver, "Painel de Suprimentos", espera=0)
     fechar_popups(driver)
     fechar_modais_informativos(driver)
@@ -992,8 +1104,11 @@ def modulo_painel_suprimentos(driver, wait):
     except Exception as e:
         adicionar_ao_log(f"Aviso: botão 'Consultar' não encontrado ou já acionado: {e}")
 
-    # Aguarda a consulta (período 2000–2050 pode retornar dezenas de milhares de linhas)
-    esperar_datagrid_carregar_todas(driver)
+    # Aguarda a primeira carga da consulta. NÃO usar esperar_datagrid_carregar_todas
+    # aqui: antes da paginação 'Todas' o grid materializa só as 25 linhas da página
+    # e a condição 'carregadas >= total' nunca fecha — eram 300s de espera morta
+    # em toda run. A espera de todas as linhas acontece após a troca de paginação.
+    esperar_datagrid_pronto(driver)
     capturar_screenshot(driver, "painel_suprimentos_consulta")
 
     # Mostrar/Ocultar Todas — Cód. Obra/Insumo/Grupo vêm DESMARCADOS por padrão.
@@ -1053,8 +1168,7 @@ def modulo_painel_suprimentos(driver, wait):
     capturar_screenshot(driver, "painel_suprimentos_modal_excel")
 
     # Sem arquivo = módulo falhou; não pode fechar como OK com o BI sem dado novo.
-    if not esperar_download_e_renomear("PAINEL DE SUPRIMENTOS - TANGARA", SUPRIMENTOS_TANGARA_DIR, wait_time=120):
-        raise TimeoutException("download do Painel de Suprimentos não foi encontrado")
+    baixar_relatorio_ou_falhar(driver, "PAINEL DE SUPRIMENTOS - TANGARA", SUPRIMENTOS_TANGARA_DIR, wait_time=120)
 
 
 # -----------------------------------------------------------------------------------------------------------------------------------
