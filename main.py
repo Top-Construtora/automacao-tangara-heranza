@@ -2,8 +2,9 @@ import os
 import time
 import shutil
 import datetime
+import unicodedata
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException, InvalidElementStateException
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
@@ -33,7 +34,7 @@ EMAIL = os.getenv('TANGARA_EMAIL')
 EMAIL_PASSWORD = os.getenv('TANGARA_EMAIL_PASSWORD')
 
 # Criar diretórios se não existirem
-for directory in [LOG_DIR, DOWNLOAD_DIR, ENGENHARIA_DIR, SUPRIMENTOS_DIR, 
+for directory in [LOG_DIR, DOWNLOAD_DIR, ENGENHARIA_DIR, SUPRIMENTOS_DIR,
                   SUPRIMENTOS_TANGARA_DIR, ADMINISTRATIVO_DIR]:
     try:
         os.makedirs(directory, exist_ok=True)
@@ -49,9 +50,9 @@ def adicionar_ao_log(mensagem, caminho_log=caminho_do_arquivo_de_log):
     """Adiciona mensagem ao arquivo de log com timestamp"""
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     mensagem_formatada = f"{timestamp} - {mensagem}"
-    
+
     print(mensagem_formatada)  # Sempre imprimir no console primeiro
-    
+
     try:
         with open(caminho_log, "a", encoding="utf-8") as log_file:
             log_file.write(f"{mensagem_formatada}\n")
@@ -72,22 +73,22 @@ def criar_driver():
     """Cria o driver do Chrome otimizado para Docker"""
     try:
         chrome_options = Options()
-        
+
         # Opções essenciais para rodar no Docker
         chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920,1080")
-        
+
         # Opções anti-detecção
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
-        
+
         # User agent
         chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        
+
         # Configurações de download
         prefs = {
             "download.default_directory": DOWNLOAD_DIR,
@@ -96,22 +97,24 @@ def criar_driver():
             "safeBrowse.enabled": True
         }
         chrome_options.add_experimental_option("prefs", prefs)
-        
+
         driver = webdriver.Chrome(options=chrome_options)
-        
+
+        # Bloqueia os pop-ups do Beamer (novidades/pesquisas) impedindo o
+        # carregamento do embed — sem os scripts, o pop-up nunca aparece.
         driver.execute_cdp_cmd('Network.enable', {})
         driver.execute_cdp_cmd('Network.setBlockedURLs', {
             "urls": [
-                "*beamer*", 
-                "*novidades.sienge.com.br*" # Adicionei este da iframe que também vi na tua imagem
+                "*beamer*",
+                "*novidades.sienge.com.br*"
             ]
         })
-        
+
         driver.set_page_load_timeout(60)
-        
+
         adicionar_ao_log("Driver Chrome criado com sucesso")
         return driver
-        
+
     except Exception as e:
         adicionar_ao_log(f"Erro ao criar driver: {str(e)}")
         raise
@@ -120,7 +123,7 @@ def esperar_download_e_renomear(novo_nome_arquivo, diretorio_destino, wait_time=
     """Espera um novo arquivo ser baixado e o renomeia."""
     adicionar_ao_log(f"Aguardando download do arquivo '{novo_nome_arquivo}'...")
     arquivos_antes = set(os.listdir(DOWNLOAD_DIR))
-    
+
     fim_espera = time.time() + wait_time
     arquivo_baixado = None
 
@@ -148,14 +151,14 @@ def esperar_download_e_renomear(novo_nome_arquivo, diretorio_destino, wait_time=
     if arquivo_baixado:
         extensao = os.path.splitext(arquivo_baixado)[1]
         caminho_destino_final = os.path.join(diretorio_destino, f"{novo_nome_arquivo}{extensao}")
-        
+
         if os.path.exists(caminho_destino_final):
             try:
                 os.remove(caminho_destino_final)
                 adicionar_ao_log(f"Arquivo existente removido: {caminho_destino_final}")
             except PermissionError:
                 adicionar_ao_log(f"Aviso: Sem permissão para remover arquivo existente: {caminho_destino_final}")
-            
+
         try:
             shutil.move(arquivo_baixado, caminho_destino_final)
             adicionar_ao_log(f"Arquivo '{os.path.basename(caminho_destino_final)}' salvo em '{diretorio_destino}'")
@@ -173,18 +176,18 @@ def converter_xls_para_xlsx_alternativo(arquivo_entrada):
         import pandas as pd
         if not os.path.exists(arquivo_entrada):
             raise FileNotFoundError(f"Arquivo não encontrado: {arquivo_entrada}")
-        
+
         df = pd.read_excel(arquivo_entrada, engine='xlrd')
         arquivo_saida = arquivo_entrada.replace('.xls', '.xlsx')
         df.to_excel(arquivo_saida, index=False, engine='openpyxl')
-        
+
         adicionar_ao_log(f"Arquivo convertido: {arquivo_saida}")
         if os.path.exists(arquivo_saida):
             try:
                 os.remove(arquivo_entrada)
             except PermissionError:
                 adicionar_ao_log(f"Aviso: Sem permissão para remover {arquivo_entrada}")
-            
+
     except Exception as e:
         adicionar_ao_log(f"Aviso: Não foi possível converter XLS para XLSX: {str(e)}")
 
@@ -203,14 +206,14 @@ def fechar_janela(driver, janela_original):
 def marcar_obras(driver, wait, valor):
     """Marca obra específica no formulário"""
     wait.until(EC.element_to_be_clickable((By.XPATH, "//td[img[@title='Abre a consulta']]"))).click()
-    
+
     wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "layerFormConsulta")))
-    
+
     try:
         elemento = wait.until(EC.presence_of_element_located((By.XPATH, f"//input[@type='radio' and @name='rowSelect' and @value='{valor}']")))
         elemento.click()
         wait.until(EC.element_to_be_clickable((By.ID, 'pbSelecionar'))).click()
-        adicionar_ao_log(f"Obra marcada com sucesso")
+        adicionar_ao_log("Obra marcada com sucesso")
     except Exception as e:
         adicionar_ao_log(f"Erro ao tentar marcar o input: {e}")
     finally:
@@ -225,20 +228,20 @@ def configurar_datas_js(driver, id_inicio, id_fim, data_inicio="01/01/2000", dat
     adicionar_ao_log(f"Datas configuradas via JS: {data_inicio} a {data_fim}")
 
 def capturar_screenshot(driver, nome_arquivo=None, pasta_log=None):
-    # Definir diretório de logs
+    """Salva um screenshot em LOG_DIR (ou em pasta_log, se informada)."""
     if pasta_log is None:
         pasta_log = LOG_DIR
-    
+
     # Gerar nome do arquivo com timestamp
     if nome_arquivo is None:
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
         nome_arquivo = f'screenshot_{timestamp}.png'
     elif not nome_arquivo.endswith('.png'):
         nome_arquivo += '.png'
-    
+
     # Caminho completo
     caminho_completo = os.path.join(pasta_log, nome_arquivo)
-    
+
     try:
         # Capturar screenshot
         driver.save_screenshot(caminho_completo)
@@ -247,6 +250,23 @@ def capturar_screenshot(driver, nome_arquivo=None, pasta_log=None):
     except Exception as e:
         print(f"Erro ao capturar screenshot: {e}")
         return None
+
+def fechar_popups(driver, timeout=3):
+    """Fecha banners/avisos comuns (botão de notificação + 'Entendi'). Ignora se não houver.
+
+    Usa espera curta própria em vez do `wait` global de 30s. Com o Beamer
+    bloqueado em criar_driver esses banners quase nunca aparecem, e cada espera
+    que estourava custava 30s. Quando o banner existe, ele já está no DOM no
+    momento em que a página termina de carregar — 3s são suficientes.
+    """
+    espera = WebDriverWait(driver, timeout)
+    for localizador in ((By.XPATH, '/html/body/div[2]/div/div/div[4]/button'),
+                        (By.XPATH, "//button[contains(text(), 'Entendi')]")):
+        try:
+            espera.until(EC.element_to_be_clickable(localizador)).click()
+            time.sleep(1)
+        except Exception:
+            pass
 
 # ------------------------------- Telas novas do Sienge (9.0.4 / MUI) ---------------------------------
 
@@ -428,22 +448,206 @@ def exportar_excel_mui(driver, wait):
     driver.execute_script("arguments[0].click();", exportar)
     adicionar_ao_log("Botão 'Exportar' clicado.")
 
+
 # -----------------------------------------------------------------------------------------------------------------------------------
-# ------------------------------------------------- MAIN ----------------------------------------------------------------------------
+# ------------------------------------------------- RESILIÊNCIA E ORQUESTRAÇÃO -----------------------------------------------------
 # -----------------------------------------------------------------------------------------------------------------------------------
 
-try:
-    adicionar_ao_log("Iniciando automação TANGARA no Docker")
-    
-    driver = criar_driver()
-    wait = WebDriverWait(driver, 30)
-    
+
+class ModuloSemAcesso(Exception):
+    """O usuário logado não tem permissão para o módulo — não é falha do robô."""
+
+
+# Frases (minúsculas) que o SIENGE exibe quando o usuário não tem permissão.
+# Mantidas restritas de propósito: um falso positivo aqui pularia um módulo bom.
+FRASES_SEM_ACESSO = (
+    "não tem permissão",
+    "nao tem permissao",
+    "não possui permissão",
+    "nao possui permissao",
+    "sem permissão de acesso",
+    "sem permissao de acesso",
+    "permissão insuficiente",
+    "permissao insuficiente",
+    "acesso negado",
+    "acesso não autorizado",
+    "acesso nao autorizado",
+    "usuário não autorizado",
+    "usuario nao autorizado",
+    "não tem autorização",
+    "nao tem autorizacao",
+)
+
+STATUS_OK = "OK"
+STATUS_FALHOU = "FALHOU"
+STATUS_SEM_ACESSO = "SEM ACESSO"
+
+
+def _texto_da_pagina(driver):
+    """Texto visível da página e dos iframes de mesma origem, em minúsculas."""
+    return driver.execute_script("""
+        let t = document.body ? document.body.innerText : '';
+        for (const f of document.querySelectorAll('iframe')) {
+            try { t += '\\n' + f.contentDocument.body.innerText; } catch (e) {}
+        }
+        return t.toLowerCase();
+    """) or ""
+
+
+def _frase_de_bloqueio(texto):
+    for frase in FRASES_SEM_ACESSO:
+        if frase in texto:
+            return frase
+    return None
+
+
+def verificar_acesso(driver, nome_modulo, espera=3):
+    """Detecta cedo a página de 'sem permissão' do SIENGE.
+
+    Sem esta checagem, um módulo sem acesso só falha depois de vários
+    WebDriverWait estourando (30s cada). Levanta ModuloSemAcesso para que
+    executar_modulo registre o motivo real e siga para o próximo módulo.
+
+    O SIENGE é uma SPA com rotas em hash: um driver.get() nem sempre recarrega a
+    página, então o texto logo após a navegação pode ainda ser o do módulo
+    anterior. Por isso a frase de bloqueio precisa aparecer em duas leituras
+    separadas — evita pular um módulo bom por causa de conteúdo velho na tela.
+    """
+    if espera:
+        time.sleep(espera)
+
+    try:
+        frase = _frase_de_bloqueio(_texto_da_pagina(driver))
+        if frase is None:
+            return
+
+        time.sleep(2)
+        frase = _frase_de_bloqueio(_texto_da_pagina(driver))
+        if frase is None:
+            return
+    except Exception as e:
+        adicionar_ao_log(f"AVISO: não foi possível ler a página para checar acesso: {e}")
+        return
+
+    raise ModuloSemAcesso(f"{nome_modulo}: página retornou \"{frase}\"")
+
+
+def slug_ascii(texto):
+    """Converte um nome de módulo em nome de arquivo seguro.
+
+    Os nomes de módulo têm acentos e parênteses ('Apropriações de Insumos
+    (Engenharia)'). Os screenshots vão para uma pasta que é lida por fora,
+    então o nome é reduzido a ASCII: acento vira letra simples, o resto vira '_'.
+    """
+    sem_acento = (
+        unicodedata.normalize("NFKD", texto)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+    )
+    slug = "".join(c if c.isalnum() else "_" for c in sem_acento.lower())
+    while "__" in slug:
+        slug = slug.replace("__", "_")
+    return slug.strip("_")
+
+
+def sanear_estado(driver, janela_original=None):
+    """Devolve o driver a um estado neutro entre módulos.
+
+    Um módulo que quebra no meio costuma deixar o driver dentro de um iframe,
+    com uma aba de relatório aberta ou com um modal na frente. Sem esta limpeza
+    o módulo seguinte falharia por herança e o isolamento não teria efeito.
+    """
+    try:
+        if janela_original and janela_original in driver.window_handles:
+            for handle in list(driver.window_handles):
+                if handle != janela_original:
+                    driver.switch_to.window(handle)
+                    driver.close()
+            driver.switch_to.window(janela_original)
+    except Exception as e:
+        adicionar_ao_log(f"AVISO: falha ao fechar janelas extras: {e}")
+
+    try:
+        driver.switch_to.default_content()
+    except Exception:
+        pass
+
+    try:
+        ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+    except Exception:
+        pass
+
+
+def executar_modulo(driver, funcao_modulo, nome_modulo, wait_local, janela_original=None):
+    """Executa um módulo isolando suas falhas do resto da automação.
+
+    Retorna STATUS_OK, STATUS_SEM_ACESSO ou STATUS_FALHOU — nunca propaga a
+    exceção, para que os demais módulos continuem rodando.
+    """
+    adicionar_ao_log(f"\n--- INICIANDO MÓDULO: {nome_modulo} ---")
+    sanear_estado(driver, janela_original)
+
+    try:
+        funcao_modulo(driver, wait_local)
+        adicionar_ao_log(f"--- MÓDULO '{nome_modulo}' FINALIZADO COM SUCESSO ---")
+        return STATUS_OK
+
+    except ModuloSemAcesso as e:
+        adicionar_ao_log(f"### MÓDULO IGNORADO — SEM ACESSO: {e}")
+        adicionar_ao_log("### A execução continuará com o próximo módulo.")
+        return STATUS_SEM_ACESSO
+
+    except Exception as e:
+        nome_screenshot = f"erro_{slug_ascii(nome_modulo)}"
+        adicionar_ao_log("!")
+        adicionar_ao_log(f"!!! ERRO AO EXECUTAR O MÓDULO: {nome_modulo} !!!")
+        adicionar_ao_log(f"!!! ERRO: {e}")
+        adicionar_ao_log(
+            f"!!! A execução continuará com o próximo módulo. Screenshot: {nome_screenshot}.png"
+        )
+        adicionar_ao_log("!")
+        capturar_screenshot(driver, nome_screenshot)
+        return STATUS_FALHOU
+
+    finally:
+        sanear_estado(driver, janela_original)
+
+
+def resumo_execucao(resultados):
+    """Imprime no log o placar final por módulo."""
+    if not resultados:
+        return
+
+    adicionar_ao_log("\n========== RESUMO DA EXECUÇÃO ==========")
+    for nome, status in resultados:
+        adicionar_ao_log(f"[{status}] {nome}")
+
+    ok = sum(1 for _, status in resultados if status == STATUS_OK)
+    sem_acesso = sum(1 for _, status in resultados if status == STATUS_SEM_ACESSO)
+    falhou = sum(1 for _, status in resultados if status == STATUS_FALHOU)
+    adicionar_ao_log(
+        f"{ok}/{len(resultados)} módulos com sucesso "
+        f"({sem_acesso} sem acesso, {falhou} com erro)."
+    )
+    adicionar_ao_log("========================================")
+
+
+# -----------------------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------- MÓDULOS ------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------------------------------------------
+
+def executar_login(driver, wait):
+    """Login no SIENGE. Etapa crítica: se falhar, nenhum módulo pode rodar.
+
+    Retorna o handle da janela original, usado por sanear_estado() para
+    fechar abas de relatório deixadas para trás por módulos que quebraram.
+    """
     adicionar_ao_log("Acessando página do SIENGE TANGARA...")
     driver.get("https://guzattizompero.sienge.com.br/sienge/")
-        
+
     wait.until(EC.element_to_be_clickable((By.ID, "btnEntrarComSiengeID"))).click()
     adicionar_ao_log("Botão de login clicado")
-    
+
     adicionar_ao_log("Verificando tela de login adicional...")
     email_input_ms = WebDriverWait(driver, 10).until(
         EC.visibility_of_element_located((By.XPATH, "//input[@name='email']"))
@@ -458,10 +662,10 @@ try:
     password_input_ms.send_keys(EMAIL_PASSWORD)
     password_input_ms.send_keys(Keys.ENTER)
     adicionar_ao_log("Senha inserida na tela.")
-    
+
     try:
         # Aguarda até 5 segundos para o alerta aparecer na tela (caso o usuário já esteja logado)
-        alerta = WebDriverWait(driver, 5).until(
+        WebDriverWait(driver, 5).until(
             EC.visibility_of_element_located((By.XPATH, "//div[contains(@class,'spwAlertaAviso')]"))
         )
         driver.find_element(By.CLASS_NAME, "Button-prim").click()
@@ -472,30 +676,27 @@ try:
     # Espera o carregamento da página principal pós-login
     wait.until(EC.title_contains("Sienge"))
     adicionar_ao_log("Login realizado com sucesso, página principal carregada.")
-    
-    janela_original = driver.current_window_handle
-    
-    # ------------------------------------------------- CADASTRO DE CONTRATOS -----------------------------------------------------------
-    # O Sienge trocou esta tela em 2026 (9.0.4): modais de novidade na entrada,
-    # datas por input[name], painel de colunas novo e export client-side (só as
-    # linhas materializadas no grid). Fluxo: fechar modais → datas 2000→2050 →
-    # mostrar todas as colunas → Consultar → paginação 'Todas' → esperar a grid
-    # materializar tudo → Gerar Relatório → excel.
+
+    return driver.current_window_handle
+
+
+def modulo_cadastro_contratos(driver, wait):
+    """Cadastro de Contratos (Suprimentos).
+
+    O Sienge trocou esta tela em 2026 (9.0.4): modais de novidade na entrada,
+    datas por input[name], painel de colunas novo e export client-side (só as
+    linhas materializadas no grid). Fluxo: fechar modais → datas 2000→2050 →
+    mostrar todas as colunas → Consultar → paginação 'Todas' → esperar a grid
+    materializar tudo → Gerar Relatório → excel.
+    """
     adicionar_ao_log("Iniciando extração de Cadastro de Contratos...")
     driver.get("https://guzattizompero.sienge.com.br/sienge/8/index.html#/suprimentos/contratos-e-medicoes/contratos/cadastros")
     time.sleep(8)
+    verificar_acesso(driver, "Cadastro de Contratos", espera=0)
 
     # Use ActionChains to send ESCAPE key to the active element
-    actions = ActionChains(driver)
-    actions.send_keys(Keys.ESCAPE)
-    actions.perform()
-
-    try:
-        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/div/div/div[4]/button'))).click()
-        time.sleep(1)
-    except Exception:
-        pass
-
+    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+    fechar_popups(driver)
     fechar_modais_informativos(driver)
 
     # Configurar relatório
@@ -520,25 +721,16 @@ try:
     exportar_excel_mui(driver, wait)
 
     esperar_download_e_renomear("cadastro de contratos", ADMINISTRATIVO_DIR, wait_time=120)
-    
-    # ------------------------------------------------- RELATÓRIOS ENGENHARIA -----------------------------------------------------------
-    # Analítico de Apropriações por Obra
+
+
+def modulo_analitico_apropriacoes(driver, wait):
+    """Analítico de Apropriações por Obra — Emissão e Vencimento (Engenharia)."""
     adicionar_ao_log("Acessando Analítico de Apropriações por Obra...")
     driver.get("https://guzattizompero.sienge.com.br/sienge/8/index.html#/common/page/588")
-    
-    try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/div/div/div[4]/button'))).click()
-    except:
-        pass
-    
-    try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Entendi')]"))).click()
-    except:
-        pass
-    
+    verificar_acesso(driver, "Analítico de Apropriações por Obra")
+    fechar_popups(driver)
+
     wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, 'iFramePage')))
-    
-    actions = ActionChains(driver)
 
     Select(wait.until(EC.visibility_of_element_located((By.NAME, 'analise.selecao')))).select_by_value("emissao")
 
@@ -556,7 +748,7 @@ try:
     wait.until(EC.element_to_be_clickable((By.ID, 'analise.imprimirObservacaoTitulo'))).click()
     wait.until(EC.element_to_be_clickable((By.ID, 'analise.imprimirDadosEmColunasNaoMescladas'))).click()
     capturar_screenshot(driver, "analitico_de_apropriacoes.png", LOG_DIR)
-    
+
     wait.until(EC.element_to_be_clickable((By.ID, 'visualizarButton'))).click()
     esperar_download_e_renomear("Analítico de Apropriações por Obra EMISSAO - HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
 
@@ -568,32 +760,25 @@ try:
 
     driver.switch_to.default_content()
 
-    # ------------------------------------------------- COMPARATIVO ORÇADO X COMPROMETIDO -----------------------------------------------
+
+def modulo_orcado_comprometido(driver, wait):
+    """Comparativo Orçado x Comprometido (Engenharia)."""
     adicionar_ao_log("Acessando Comparativo Orçado x Comprometido...")
     driver.get("https://guzattizompero.sienge.com.br/sienge/8/index.html#/common/page/627")
-    
-    try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/div/div/div[4]/button'))).click()
-        time.sleep(2)
-    except:
-        pass
-    
-    try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Entendi')]"))).click()
-    except:
-        pass
-    
+    verificar_acesso(driver, "Orçado x Comprometido")
+    fechar_popups(driver)
+
     wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, 'iFramePage')))
-    
+
     marcar_obras(driver, wait, "0")
-    
+
     configurar_datas_js(driver, "analise.periodoInicio", "analise.periodoFim")
-    
+
     Select(driver.find_element(By.NAME, 'analise.selecao')).select_by_value("emissao")
     Select(driver.find_element(By.ID, "analise.nivelDetalhamento")).select_by_value("4")
     Select(driver.find_element(By.ID, "analise.bdi")).select_by_value("N")
     Select(driver.find_element(By.ID, "analise.leiSocial")).select_by_value("N")
-    
+
     for checkbox_id in ['analise.consDocPrev',
                         'analise.impPercRealiItensOrc',
                         'analise.impVlEstoqAtualObra',
@@ -602,35 +787,28 @@ try:
                         'analise.ocultarRegistroSemMovimentacao'
                         ]:
         wait.until(EC.element_to_be_clickable((By.ID, checkbox_id))).click()
-    
+
     wait.until(EC.element_to_be_clickable((By.ID, 'btOpcoesRelatorio'))).click()
     wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "layerFormConsulta")))
     Select(driver.find_element(By.ID, 'formatoSaidaDocumento')).select_by_value("XLSX")
     wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/form/table/tbody/tr[3]/td/table/tbody/tr/td[1]/span[1]/span/input'))).click()
     driver.switch_to.parent_frame()
-    
+
     capturar_screenshot(driver, "comparativo_orcado_x_comprometido.png", LOG_DIR)
     wait.until(EC.element_to_be_clickable((By.ID, 'visualizarButton'))).click()
     esperar_download_e_renomear("OrcCom-HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
     driver.switch_to.default_content()
 
-    # ------------------------------------------------- COMPARATIVO MEDIDO X COMPROMETIDO -----------------------------------------------
+
+def modulo_medido_comprometido(driver, wait):
+    """Comparativo Medido x Comprometido (Engenharia)."""
     adicionar_ao_log("Acessando Comparativo Medido x Comprometido...")
     driver.get("https://guzattizompero.sienge.com.br/sienge/8/index.html#/common/page/623")
-    
-    try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/div/div/div[4]/button'))).click()
-        time.sleep(2)
-    except:
-        pass
-    
-    try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Entendi')]"))).click()
-    except:
-        pass
-    
+    verificar_acesso(driver, "Medido x Comprometido")
+    fechar_popups(driver)
+
     wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, 'iFramePage')))
-    
+
     marcar_obras(driver, wait, "0")
 
     configurar_datas_js(driver, "analise.periodoInicio", "analise.periodoFim")
@@ -638,7 +816,7 @@ try:
     Select(driver.find_element(By.ID, "analise.nivelDetalhamento")).select_by_value("0")
     Select(driver.find_element(By.ID, "analise.bdi")).select_by_value("N")
     Select(driver.find_element(By.ID, "analise.leiSocial")).select_by_value("N")
-    
+
     for checkbox_id in ['analise.consDocPrev',
                         'analise.impPercRealiItensOrc',
                         'analise.impVlEstoqAtualObra',
@@ -646,114 +824,100 @@ try:
                         'analise.impCodOrc'
                         ]:
         wait.until(EC.element_to_be_clickable((By.ID, checkbox_id))).click()
-    
+
     capturar_screenshot(driver, "comparativo_medido_x_comprometido.png", LOG_DIR)
-    
+
     wait.until(EC.element_to_be_clickable((By.ID, 'visualizarButton'))).click()
     esperar_download_e_renomear("MedCom-HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
     driver.switch_to.default_content()
-    
-    # ------------------------------------------------- APROPRIAÇÕES DE INSUMOS ---------------------------------------------------------
 
+
+def modulo_apropriacoes_insumos(driver, wait):
+    """Apropriações de Insumos (Engenharia)."""
     adicionar_ao_log("Acessando Apropriações de Insumos...")
     driver.get("https://guzattizompero.sienge.com.br/sienge/8/index.html#/common/page/2138")
-    
-    try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/div/div/div[4]/button'))).click()
-        time.sleep(2)
-    except:
-        pass
-    
-    try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Entendi')]"))).click()
-    except:
-        pass
-    
+    verificar_acesso(driver, "Apropriações de Insumos")
+    fechar_popups(driver)
+
     wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, 'iFramePage')))
     marcar_obras(driver, wait, "0")
     configurar_datas_js(driver, "filter.dataInicialPeriodo", "filter.dataFinalPeriodo")
     Select(driver.find_element(By.ID, 'tpBDI')).select_by_value("N")
     Select(driver.find_element(By.ID, 'tpEncargosSociais')).select_by_value("N")
-    
+
     wait.until(EC.element_to_be_clickable((By.ID, "filter.imprimirSemQuantidades"))).click()
     wait.until(EC.element_to_be_clickable((By.ID, "imprimirPedidosPendentes"))).click()
     wait.until(EC.element_to_be_clickable((By.ID, "imprimirContratosPendentes"))).click()
-    
+
     wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@type='submit' and @name='btFiltrar']"))).click()
     esperar_download_e_renomear("ApIns-HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
     driver.switch_to.default_content()
 
-    # ------------------------------------------------- RELATÓRIOS SUPRIMENTOS ----------------------------------------------------------
+
+def modulo_pedidos_compra(driver, wait):
+    """Relação de Pedidos de Compras (Suprimentos)."""
     adicionar_ao_log("Acessando Relatórios de Suprimentos...")
     driver.get("https://guzattizompero.sienge.com.br/sienge/8/index.html#/suprimentos/compras/pedidos-de-compra/cadastros")
-    
-    try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/div/div/div[4]/button'))).click()
-        time.sleep(2)
-    except:
-        pass
-    
-    try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Entendi')]"))).click()
-    except:
-        pass
+    verificar_acesso(driver, "Pedidos de Compras")
+    fechar_popups(driver)
+    fechar_modais_informativos(driver)
 
-    wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div/div[4]/main/div[1]/div[2]/div[1]/div/div[2]/div/div/div/div/form/div[1]/div[7]/div/div/div/button"))).click()
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'MuiPickersCalendarHeader-switchViewButton')]"))).click()
-    ano1 = wait.until(EC.presence_of_element_located((By.XPATH, "//button[text()='2000']")))
-    driver.execute_script("arguments[0].scrollIntoView(true);", ano1)
-    ano1.click()
-    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-    
-    wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div/div[4]/main/div[1]/div[2]/div[1]/div/div[2]/div/div/div/div/form/div[1]/div[8]/div/div/div/button"))).click()
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'MuiPickersCalendarHeader-switchViewButton')]"))).click()
-    ano2 = wait.until(EC.presence_of_element_located((By.XPATH, "//button[text()='2050']")))
-    driver.execute_script("arguments[0].scrollIntoView(true);", ano2)
-    ano2.click()
-    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+    driver.switch_to.default_content()
 
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Colunas']"))).click()
+    data_inicial = wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div/div[4]/main/div[1]/div[2]/div[1]/div/div[2]/div/div/div/div/form/div[1]/div[7]/div/div/input")))
+    data_inicial.click()
+    data_inicial.send_keys(Keys.CONTROL + "a")
+    data_inicial.send_keys("01/01/2000")
+    data_inicial.send_keys(Keys.ENTER)
+
+    data_final = wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div/div[4]/main/div[1]/div[2]/div[1]/div/div[2]/div/div/div/div/form/div[1]/div[8]/div/div/input")))
+    data_final.click()
+    data_final.send_keys(Keys.CONTROL + "a")
+    data_final.send_keys("01/01/2050")
+    data_final.send_keys(Keys.ENTER)
+
+    # Todos os seletores abaixo eram XPaths posicionais que a atualização do SIENGE
+    # invalidou (o do botão 'Colunas' passou a casar com 0 elementos, derrubando o
+    # módulo). Trocados por âncoras semânticas — texto e aria-label da toolbar, que
+    # é idêntica à da tela de Contratos.
+    wait.until(EC.element_to_be_clickable(
+        (By.XPATH, "//button[@aria-label='Exibir seletor de colunas']"))).click()
+
     try:
         wait.until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Mostrar/Ocultar Todas']"))).click()
     except Exception:
         adicionar_ao_log("Fallback: clicando no input 'Mostrar/Ocultar Todas' diretamente.")
         mostrar_todas_input = wait.until(EC.presence_of_element_located((By.XPATH, "//input[@name='Mostrar/Ocultar Todas']")))
         driver.execute_script("arguments[0].click();", mostrar_todas_input)
-    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-    
-    filtro = wait.until(EC.presence_of_element_located((By.XPATH, "/html/body/div[1]/div/div[4]/main/div[1]/div[2]/div[2]/div/div[3]/div[2]/div/div[2]/div")))
-    driver.execute_script("arguments[0].scrollIntoView(true);", filtro)
-    filtro.click()
 
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//li[text()='Todas']"))).click()
-    adicionar_ao_log("Exibição de linhas por página alterada para 'Todas'.")
+    # Fecha o popover de colunas antes de seguir, senão ele intercepta os cliques.
+    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+    time.sleep(1)
+
+    # Paginação 25 -> Todas. A espera real das linhas fica para depois do
+    # Consultar: antes dele o grid pode estar vazio (sem total no rodapé) e a
+    # espera giraria o timeout inteiro à toa.
+    selecionar_paginacao_todas(driver, wait, rotulo="Todas", rotulos_alternativos=("Todos",))
     time.sleep(15)
 
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Gerar Relatório']"))).click()
+    wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(.)='Consultar']"))).click()
+    esperar_datagrid_carregar_todas(driver)
 
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//div[@role='presentation']//div[@role='combobox']"))).click()
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//li[@data-value='excel']"))).click()
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Exportar']"))).click()
-    
+    # Gerar Relatório → excel → Exportar (ancorado no diálogo)
+    exportar_excel_mui(driver, wait)
+
     esperar_download_e_renomear("RELAÇÃO DE PEDIDOS DE COMPRAS - TANGARA", SUPRIMENTOS_TANGARA_DIR, wait_time=180)
 
-    # ------------------------------------------------- RELATÓRIO DE RELAÇÃO DE SOLICITAÇÕES ----------------------------------------------
+
+def modulo_relacao_solicitacoes(driver, wait):
+    """Relação de Solicitações (Suprimentos)."""
     adicionar_ao_log("Acessando Relatório de Solicitações...")
     driver.get("https://guzattizompero.sienge.com.br/sienge/8/index.html#/common/page/1328")
-    
-    try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/div/div/div[4]/button'))).click()
-        time.sleep(2)
-    except:
-        pass
-    
-    try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Entendi')]"))).click()
-    except:
-        pass
-    
+    verificar_acesso(driver, "Relação de Solicitações")
+    fechar_popups(driver)
+
     wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, 'iFramePage')))
-    
+
     wait.until(EC.element_to_be_clickable((By.XPATH, "//img[@title='Abre a consulta']"))).click()
     wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "layerFormConsulta")))
     wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@type='checkbox' and @value='0']"))).click()
@@ -761,28 +925,22 @@ try:
     driver.switch_to.parent_frame()
 
     driver.execute_script("document.getElementById('dataInicialSolicitacao').value = '01/01/2000'; document.getElementById('dataFinalSolicitacao').value = '01/01/2050';")
-    
+
     Select(wait.until(EC.visibility_of_element_located((By.NAME, 'filterRelacao.printCotadosReservas')))).select_by_value("S")
-    
+
     wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@value='Visualizar']"))).click()
     esperar_download_e_renomear("RELATORIO DE RELACAO DE SOLICITACOES - TANGARA", SUPRIMENTOS_TANGARA_DIR)
     driver.switch_to.default_content()
 
-    # ------------------------------------------------- PAINEL DE SUPRIMENTOS -----------------------------------------------------------------
+
+def modulo_painel_suprimentos(driver, wait):
+    """Painel de Suprimentos (Suprimentos)."""
     adicionar_ao_log("Acessando Painel de Suprimentos...")
     driver.get("https://guzattizompero.sienge.com.br/sienge/8/index.html#/suprimentos/compras/painel-de-compras")
     time.sleep(5)
-
-    try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/div/div/div[4]/button'))).click()
-        time.sleep(2)
-    except Exception:
-        pass
-
-    try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Entendi')]"))).click()
-    except Exception:
-        pass
+    verificar_acesso(driver, "Painel de Suprimentos", espera=0)
+    fechar_popups(driver)
+    fechar_modais_informativos(driver)
 
     driver.switch_to.default_content()
 
@@ -800,12 +958,6 @@ try:
     data_final.send_keys(Keys.ENTER)
     time.sleep(1)
 
-    try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[2]/div/div/div[4]/button"))).click()
-        adicionar_ao_log("Banner de notificação fechado.")
-    except Exception:
-        adicionar_ao_log("Nenhum banner de notificação encontrado.")
-
     # Dispara consulta para listar todos os registros no período
     try:
         consultar_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(.)='Consultar' or normalize-space(.)='CONSULTAR']")))
@@ -814,99 +966,136 @@ try:
     except Exception as e:
         adicionar_ao_log(f"Aviso: botão 'Consultar' não encontrado ou já acionado: {e}")
 
-    time.sleep(10)
+    # Aguarda a consulta (período 2000–2050 pode retornar dezenas de milhares de linhas)
+    esperar_datagrid_carregar_todas(driver)
     capturar_screenshot(driver, "painel_suprimentos_consulta")
 
-    # Mostrar/Ocultar Todas (mesmo padrão do habitat)
+    # Mostrar/Ocultar Todas — Cód. Obra/Insumo/Grupo vêm DESMARCADOS por padrão.
+    # O controle fica dentro do popover "Exibir seletor de colunas" (botão de ícone,
+    # sem texto), por isso os antigos gatilhos 'COLUNAS'/'FILTROS' nunca o encontravam.
     try:
-        try:
-            wait.until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Mostrar/Ocultar Todas']"))).click()
-            adicionar_ao_log("'Mostrar/Ocultar Todas' clicado.")
-        except Exception:
-            for trigger in ["COLUNAS", "Colunas", "FILTROS", "Filtros"]:
-                try:
-                    wait.until(EC.element_to_be_clickable((By.XPATH, f"//button[normalize-space(.)='{trigger}']"))).click()
-                    time.sleep(1)
-                    wait.until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Mostrar/Ocultar Todas']"))).click()
-                    adicionar_ao_log(f"'{trigger}' → 'Mostrar/Ocultar Todas' clicado.")
-                    driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
-                    break
-                except Exception:
-                    continue
-            else:
-                adicionar_ao_log("AVISO: 'Mostrar/Ocultar Todas' não localizado.")
+        def _clicar_robusto(el):
+            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+            try:
+                ActionChains(driver).move_to_element(el).click().perform()
+            except Exception:
+                driver.execute_script("arguments[0].click();", el)
+
+        # Abre o seletor de colunas (botão de ícone, sem texto)
+        col_btn = wait.until(EC.element_to_be_clickable(
+            (By.XPATH, "//button[@aria-label='Exibir seletor de colunas']")))
+        _clicar_robusto(col_btn)
+        time.sleep(1)
+
+        # Checkbox-mestre 'Mostrar/Ocultar Todas' (label MuiFormControlLabel)
+        master = wait.until(EC.presence_of_element_located(
+            (By.XPATH, "//label[.//span[normalize-space(.)='Mostrar/Ocultar Todas']]")))
+        master_input = master.find_element(By.XPATH, ".//input[@type='checkbox']")
+
+        # Clica até ficar 'checked' e não-indeterminado (= todas as colunas visíveis).
+        # Estado inicial costuma ser indeterminado → 1 clique marca todas.
+        for _ in range(3):
+            checked = bool(master_input.get_property('checked'))
+            indeterminate = bool(driver.execute_script("return arguments[0].indeterminate;", master_input))
+            if checked and not indeterminate:
+                break
+            _clicar_robusto(master)
+            time.sleep(0.7)
+        adicionar_ao_log("'Mostrar/Ocultar Todas' marcado (todas as colunas visíveis).")
+
+        # Fecha o popover de colunas
+        ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+        time.sleep(1)
     except Exception as e:
         adicionar_ao_log(f"AVISO: erro em 'Mostrar/Ocultar Todas': {e}")
     time.sleep(2)
 
-    # Troca paginação 25 → Todas
+    # Troca paginação 25 → Todas + espera real das linhas materializarem.
+    # CRÍTICO: trocar para 'Todas' dispara uma busca no servidor de TODAS as linhas.
+    # O export do SIENGE é client-side ("exporta o que está visível na tabela"),
+    # então exportar antes do fim da busca traz só as 25 linhas da 1ª página.
     try:
-        dropdown_xpaths = [
-            "//div[contains(@class,'MuiTablePagination-select')]",
-            "//div[contains(@class,'MuiSelect-select') and normalize-space(.)='25']",
-            "//div[@role='button' and normalize-space(.)='25']",
-            "//*[normalize-space(.)='25' and (contains(@class,'Select') or contains(@class,'pagination') or @role='button')]",
-        ]
-        dropdown = None
-        for xp in dropdown_xpaths:
-            try:
-                dropdown = wait.until(EC.element_to_be_clickable((By.XPATH, xp)))
-                break
-            except Exception:
-                continue
-        if dropdown is None:
-            raise RuntimeError("Dropdown de paginação '25' não localizado.")
-        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", dropdown)
-        try:
-            dropdown.click()
-        except Exception:
-            driver.execute_script("arguments[0].click();", dropdown)
-        time.sleep(1)
-        try:
-            wait.until(EC.element_to_be_clickable((By.XPATH, "//li[normalize-space(.)='Todas']"))).click()
-        except Exception:
-            adicionar_ao_log("Fallback: selecionando 'Todas' via JS.")
-            todas_option = wait.until(EC.presence_of_element_located((By.XPATH, "//li[contains(normalize-space(.),'Todas') or @data-value='-1']")))
-            driver.execute_script("arguments[0].click();", todas_option)
-        adicionar_ao_log("Paginação alterada para 'Todas'.")
-        time.sleep(10)
+        selecionar_paginacao_todas(driver, wait, rotulo="Todas", rotulos_alternativos=("Todos",))
+        esperar_datagrid_carregar_todas(driver)
+        time.sleep(1)  # margem extra para o modelo de dados assentar
         capturar_screenshot(driver, "painel_suprimentos_todas")
     except Exception as e:
         adicionar_ao_log(f"AVISO: falha ao trocar paginação 25 → Todas: {e}")
 
-    # Gera relatório em Excel
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(.)='Gerar Relatório' or normalize-space(.)='GERAR RELATÓRIO']"))).click()
-    adicionar_ao_log("Botão 'Gerar Relatório' clicado.")
-    time.sleep(3)
-    capturar_screenshot(driver, "painel_suprimentos_modal_export")
-
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//div[@role='presentation']//div[@role='combobox']"))).click()
-    excel_option = wait.until(EC.element_to_be_clickable((By.XPATH, "//div[@role='presentation']//li[@data-value='excel']")))
-    driver.execute_script("arguments[0].click();", excel_option)
-    time.sleep(2)
+    # Gera relatório em Excel (ancorado no diálogo — ver exportar_excel_mui)
+    exportar_excel_mui(driver, wait)
     capturar_screenshot(driver, "painel_suprimentos_modal_excel")
 
-    export_button = wait.until(EC.presence_of_element_located((By.XPATH, "//button[normalize-space(.)='Exportar' or normalize-space(.)='EXPORTAR']")))
-    driver.execute_script("arguments[0].click();", export_button)
-
     esperar_download_e_renomear("PAINEL DE SUPRIMENTOS - TANGARA", SUPRIMENTOS_TANGARA_DIR, wait_time=120)
-    
-    mostrar_mensagem_conclusao()
-    
-except Exception as e:
-    adicionar_ao_log(f"Erro crítico na automação: {str(e)}")
-    # Tenta tirar um screenshot do erro
-    if 'driver' in locals():
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        screenshot_path = os.path.join(LOG_DIR, f'error_screenshot_{timestamp}.png')
-        try:
-            driver.save_screenshot(screenshot_path)
-            adicionar_ao_log(f"Screenshot do erro salvo em: {screenshot_path}")
-        except PermissionError:
-            adicionar_ao_log(f"Aviso: Sem permissão para salvar screenshot em: {screenshot_path}")
-    mostrar_mensagem_erro()
-    raise
-finally:
-    if 'driver' in locals():
-        driver.quit()
-    adicionar_ao_log("Driver fechado. Automação finalizada.")
+
+
+# -----------------------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------- MAIN ----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------------------------------------------
+
+
+def main():
+    """Roda o login (crítico) e depois cada módulo de forma isolada.
+
+    Falha de um módulo — inclusive falta de permissão do usuário — é registrada
+    e não interrompe os demais. Só erros de setup/login abortam a automação.
+    """
+    driver = None
+    resultados = []
+
+    try:
+        adicionar_ao_log("========================================")
+        adicionar_ao_log("===== INICIANDO AUTOMAÇÃO TANGARA ======")
+        adicionar_ao_log("========================================")
+
+        driver = criar_driver()
+        wait = WebDriverWait(driver, 30)
+
+        # Login é crítico: sem ele nenhum módulo consegue rodar.
+        janela_original = executar_login(driver, wait)
+
+        modulos = [
+            (modulo_cadastro_contratos, "Cadastro de Contratos (Suprimentos)"),
+            (modulo_analitico_apropriacoes, "Analítico de Apropriações por Obra (Engenharia)"),
+            (modulo_orcado_comprometido, "Orçado x Comprometido (Engenharia)"),
+            (modulo_medido_comprometido, "Medido x Comprometido (Engenharia)"),
+            (modulo_apropriacoes_insumos, "Apropriações de Insumos (Engenharia)"),
+            (modulo_pedidos_compra, "Pedidos de Compras (Suprimentos)"),
+            (modulo_relacao_solicitacoes, "Relação de Solicitações (Suprimentos)"),
+            (modulo_painel_suprimentos, "Painel de Suprimentos (Suprimentos)"),
+        ]
+
+        for funcao, nome in modulos:
+            status = executar_modulo(driver, funcao, nome, wait, janela_original)
+            resultados.append((nome, status))
+
+        if any(status == STATUS_OK for _, status in resultados):
+            mostrar_mensagem_conclusao()
+        else:
+            mostrar_mensagem_erro()
+
+        adicionar_ao_log("Automação concluída.")
+
+    except Exception as e:
+        adicionar_ao_log("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        adicionar_ao_log(f"ERRO CRÍTICO QUE INTERROMPEU A AUTOMAÇÃO: {e}")
+        adicionar_ao_log("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        if driver:
+            timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+            capturar_screenshot(driver, f"erro_fatal_critico_{timestamp}")
+        mostrar_mensagem_erro()
+        raise
+
+    finally:
+        resumo_execucao(resultados)
+        if driver:
+            try:
+                driver.quit()
+                adicionar_ao_log("Driver finalizado.")
+            except Exception as e:
+                adicionar_ao_log(f"AVISO: falha ao encerrar o driver: {e}")
+        adicionar_ao_log("Driver fechado. Automação finalizada.")
+
+
+if __name__ == "__main__":
+    main()
