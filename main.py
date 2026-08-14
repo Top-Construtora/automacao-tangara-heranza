@@ -122,7 +122,25 @@ def criar_driver():
 def esperar_download_e_renomear(novo_nome_arquivo, diretorio_destino, wait_time=60):
     """Espera um novo arquivo ser baixado e o renomeia."""
     adicionar_ao_log(f"Aguardando download do arquivo '{novo_nome_arquivo}'...")
+    inicio = time.time()
     arquivos_antes = set(os.listdir(DOWNLOAD_DIR))
+
+    # O export client-side do SIENGE pode gravar o arquivo no mesmo segundo do
+    # clique em 'Exportar' — antes do snapshot acima, que só acontece quando esta
+    # função é chamada. O arquivo entrava em 'arquivos_antes' e nunca era visto
+    # como novo: na Impulsi, o Painel de Suprimentos esperou os 120s inteiros com
+    # o download já concluído no disco. Um arquivo pré-existente com mtime até
+    # 30s antes desta chamada é devolvido ao conjunto de candidatos: cada
+    # download processado é movido para fora de DOWNLOAD_DIR e os módulos distam
+    # minutos, então não há como casar com arquivo de um download anterior.
+    recentes_pre_snapshot = set()
+    for f in arquivos_antes:
+        try:
+            if os.path.getmtime(os.path.join(DOWNLOAD_DIR, f)) >= inicio - 30:
+                recentes_pre_snapshot.add(f)
+        except OSError:
+            pass
+    arquivos_antes -= recentes_pre_snapshot
 
     fim_espera = time.time() + wait_time
     arquivo_baixado = None
@@ -131,20 +149,28 @@ def esperar_download_e_renomear(novo_nome_arquivo, diretorio_destino, wait_time=
         arquivos_depois = set(os.listdir(DOWNLOAD_DIR))
         novos_arquivos = arquivos_depois - arquivos_antes
 
-        # Filtra arquivos temporários
-        arquivos_completos = [f for f in novos_arquivos if not f.endswith(('.tmp', '.crdownload'))]
+        # Filtra temporários: além de .tmp/.crdownload, o Chrome no Linux grava o
+        # download num arquivo oculto '.com.google.Chrome.XXXXXX' antes de
+        # renomear — ele aparece e some em instantes, e um stat() nele estoura
+        # FileNotFoundError (foi o que derrubou o Painel da Inovar).
+        arquivos_completos = [f for f in novos_arquivos
+                              if not f.endswith(('.tmp', '.crdownload'))
+                              and not f.startswith('.')]
 
         if arquivos_completos:
-            # Pega o arquivo mais recente
-            arquivo_baixado = max([os.path.join(DOWNLOAD_DIR, f) for f in arquivos_completos], key=os.path.getctime)
-            # Verifica se o arquivo parou de ser modificado
-            tamanho_inicial = os.path.getsize(arquivo_baixado)
-            time.sleep(2) # Espera 2s para ver se o tamanho muda
-            if tamanho_inicial == os.path.getsize(arquivo_baixado):
-                adicionar_ao_log(f"Download concluído: {os.path.basename(arquivo_baixado)}")
-                break # Sai do loop
-            else:
-                arquivo_baixado = None # Continua esperando
+            try:
+                # Pega o arquivo mais recente
+                arquivo_baixado = max([os.path.join(DOWNLOAD_DIR, f) for f in arquivos_completos], key=os.path.getctime)
+                # Verifica se o arquivo parou de ser modificado
+                tamanho_inicial = os.path.getsize(arquivo_baixado)
+                time.sleep(2) # Espera 2s para ver se o tamanho muda
+                if tamanho_inicial == os.path.getsize(arquivo_baixado):
+                    adicionar_ao_log(f"Download concluído: {os.path.basename(arquivo_baixado)}")
+                    break # Sai do loop
+                else:
+                    arquivo_baixado = None # Continua esperando
+            except OSError:
+                arquivo_baixado = None # arquivo sumiu/renomeou entre o listdir e o stat — tenta de novo
 
         time.sleep(1) # Pausa antes de verificar novamente
 
@@ -1026,7 +1052,9 @@ def modulo_painel_suprimentos(driver, wait):
     exportar_excel_mui(driver, wait)
     capturar_screenshot(driver, "painel_suprimentos_modal_excel")
 
-    esperar_download_e_renomear("PAINEL DE SUPRIMENTOS - TANGARA", SUPRIMENTOS_TANGARA_DIR, wait_time=120)
+    # Sem arquivo = módulo falhou; não pode fechar como OK com o BI sem dado novo.
+    if not esperar_download_e_renomear("PAINEL DE SUPRIMENTOS - TANGARA", SUPRIMENTOS_TANGARA_DIR, wait_time=120):
+        raise TimeoutException("download do Painel de Suprimentos não foi encontrado")
 
 
 # -----------------------------------------------------------------------------------------------------------------------------------
