@@ -137,7 +137,35 @@ def texto_aviso_validacao(driver):
         return None
 
 
-def esperar_download_e_renomear(novo_nome_arquivo, diretorio_destino, wait_time=60, cancelar_se=None):
+
+class ObraDivergente(Exception):
+    """O relatório baixado é de outra obra — arquivo posto em quarentena."""
+
+
+def _codigo_da_obra_no_relatorio(caminho):
+    """Lê o código da obra do cabeçalho de um relatório por obra do Sienge.
+
+    Os relatórios por obra (OrcCom, MedCom, ApIns) trazem nas primeiras linhas
+    uma célula '531 - TOM BUENO - IN531 OBRA'. Retorna só o código, ou None se
+    não encontrar (relatórios sem obra única não têm esse cabeçalho).
+    """
+    import re
+    from openpyxl import load_workbook
+    wb = load_workbook(caminho, read_only=True)
+    try:
+        ws = wb.active
+        for row in ws.iter_rows(min_row=1, max_row=20, max_col=8, values_only=True):
+            for celula in row:
+                if isinstance(celula, str):
+                    m = re.match(r"^(\d{2,})\s*-\s*\S", celula.strip())
+                    if m:
+                        return m.group(1)
+        return None
+    finally:
+        wb.close()
+
+
+def esperar_download_e_renomear(novo_nome_arquivo, diretorio_destino, wait_time=60, cancelar_se=None, codigo_obra=None):
     """Espera um novo arquivo ser baixado e o renomeia.
 
     `cancelar_se` é um predicado opcional consultado a cada volta do loop: quando
@@ -202,6 +230,27 @@ def esperar_download_e_renomear(novo_nome_arquivo, diretorio_destino, wait_time=
         time.sleep(1) # Pausa antes de verificar novamente
 
     if arquivo_baixado:
+        # Garantia de conteúdo: o mapeamento arquivo->obra é por timing; antes de
+        # entregar, confere o código da obra no cabeçalho do xlsx. Divergência vai
+        # para quarentena VERIFICAR-<nome> em vez de chegar ao BI com outro nome.
+        if codigo_obra and arquivo_baixado.lower().endswith('.xlsx'):
+            codigo_no_arquivo = None
+            try:
+                codigo_no_arquivo = _codigo_da_obra_no_relatorio(arquivo_baixado)
+            except Exception as e:
+                adicionar_ao_log(f"AVISO: não foi possível conferir a obra do relatório '{novo_nome_arquivo}': {e}")
+            if codigo_no_arquivo is None and codigo_obra:
+                adicionar_ao_log(f"AVISO: relatório de '{novo_nome_arquivo}' sem cabeçalho de obra — entregue sem conferência.")
+            elif codigo_no_arquivo is not None and str(codigo_no_arquivo) != str(codigo_obra):
+                quarentena = os.path.join(diretorio_destino, f"VERIFICAR-{novo_nome_arquivo}{os.path.splitext(arquivo_baixado)[1]}")
+                if os.path.exists(quarentena):
+                    os.remove(quarentena)
+                shutil.move(arquivo_baixado, quarentena)
+                adicionar_ao_log(
+                    f"ERRO: relatório de '{novo_nome_arquivo}' é da obra {codigo_no_arquivo}, "
+                    f"esperado {codigo_obra}. Arquivo em quarentena: {quarentena}")
+                raise ObraDivergente(f"relatório é da obra {codigo_no_arquivo}, esperado {codigo_obra}")
+
         extensao = os.path.splitext(arquivo_baixado)[1]
         caminho_destino_final = os.path.join(diretorio_destino, f"{novo_nome_arquivo}{extensao}")
 
@@ -224,7 +273,7 @@ def esperar_download_e_renomear(novo_nome_arquivo, diretorio_destino, wait_time=
         return False
 
 
-def baixar_relatorio_ou_falhar(driver, novo_nome_arquivo, diretorio_destino, wait_time=120):
+def baixar_relatorio_ou_falhar(driver, novo_nome_arquivo, diretorio_destino, wait_time=120, codigo_obra=None):
     """Espera o download (abortando cedo se o Sienge exibir aviso) e move o
     arquivo. Sem arquivo = exceção: o módulo não pode fechar como OK com o BI
     ficando sem dado novo — antes, o retorno era descartado e um aviso do
@@ -232,7 +281,8 @@ def baixar_relatorio_ou_falhar(driver, novo_nome_arquivo, diretorio_destino, wai
     """
     baixou = esperar_download_e_renomear(
         novo_nome_arquivo, diretorio_destino, wait_time=wait_time,
-        cancelar_se=lambda: texto_aviso_validacao(driver) is not None)
+        cancelar_se=lambda: texto_aviso_validacao(driver) is not None,
+        codigo_obra=codigo_obra)
     if baixou:
         return
     msg = texto_aviso_validacao(driver)
@@ -934,7 +984,7 @@ def modulo_orcado_comprometido(driver, wait):
 
     capturar_screenshot(driver, "comparativo_orcado_x_comprometido.png", LOG_DIR)
     wait.until(EC.element_to_be_clickable((By.ID, 'visualizarButton'))).click()
-    baixar_relatorio_ou_falhar(driver, "OrcCom-HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
+    baixar_relatorio_ou_falhar(driver, "OrcCom-HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120, codigo_obra="33001")
     driver.switch_to.default_content()
 
 
@@ -966,7 +1016,7 @@ def modulo_medido_comprometido(driver, wait):
     capturar_screenshot(driver, "comparativo_medido_x_comprometido.png", LOG_DIR)
 
     wait.until(EC.element_to_be_clickable((By.ID, 'visualizarButton'))).click()
-    baixar_relatorio_ou_falhar(driver, "MedCom-HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
+    baixar_relatorio_ou_falhar(driver, "MedCom-HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120, codigo_obra="33001")
     driver.switch_to.default_content()
 
 
@@ -988,7 +1038,7 @@ def modulo_apropriacoes_insumos(driver, wait):
     wait.until(EC.element_to_be_clickable((By.ID, "imprimirContratosPendentes"))).click()
 
     wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@type='submit' and @name='btFiltrar']"))).click()
-    baixar_relatorio_ou_falhar(driver, "ApIns-HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120)
+    baixar_relatorio_ou_falhar(driver, "ApIns-HERANZA - TANGARA", ENGENHARIA_DIR, wait_time=120, codigo_obra="33001")
     driver.switch_to.default_content()
 
 
