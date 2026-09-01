@@ -460,46 +460,78 @@ def mostrar_todas_colunas(driver, wait, botao_colunas=True, fechar_painel=False)
         driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
         time.sleep(1)
 
-def selecionar_paginacao_todas(driver, wait, rotulo="Todas", rotulos_alternativos=("Todos",)):
-    """Troca a paginação do grid de 25 para 'Todas'/'Todos'."""
-    dropdown_xpaths = [
-        "//div[contains(@class,'MuiTablePagination-select')]",
-        "//div[contains(@class,'MuiSelect-select') and normalize-space(.)='25']",
-        "//div[@role='button' and normalize-space(.)='25']",
-        "//*[normalize-space(.)='25' and (contains(@class,'Select') or contains(@class,'pagination') or @role='button')]",
-    ]
-    dropdown = None
-    for xp in dropdown_xpaths:
-        try:
-            dropdown = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, xp)))
-            break
-        except Exception:
-            continue
-    if dropdown is None:
-        raise TimeoutException("dropdown de paginação não localizado")
-    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", dropdown)
-    try:
-        dropdown.click()
-    except Exception:
-        driver.execute_script("arguments[0].click();", dropdown)
-    time.sleep(1)
-    for cand in (rotulo, *rotulos_alternativos):
-        try:
-            WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-                (By.XPATH, f"//li[normalize-space(.)='{cand}']"))).click()
-            adicionar_ao_log(f"Paginação alterada para '{cand}'.")
-            return
-        except Exception:
-            continue
-    opcao = wait.until(EC.presence_of_element_located(
-        (By.XPATH, f"//li[contains(normalize-space(.),'{rotulo}') or @data-value='-1']")))
-    driver.execute_script("arguments[0].click();", opcao)
-    adicionar_ao_log(f"Paginação alterada para '{rotulo}' (JS).")
+def selecionar_paginacao_todas(driver, wait, rotulo="Todas", rotulos_alternativos=("Todos",), timeout=15):
+    """Troca 'Linhas por página' de 25 para 'Todas'/'Todos' (MUI TablePagination).
 
-# Status do MuiDataGrid:
-#  - carregadas: linhas já materializadas (altura do virtualScroller / altura da linha);
-#  - total: total exibido no rodapé de paginação ("1–18787 de 18787");
-#  - carregando: spinner de loading visível.
+    O select do MUI abre no 'mousedown' — um click() via JS não o abre (era a
+    falha silenciosa da versão anterior); o clique é nativo (ActionChains) com
+    fallback na sequência real de eventos de mouse. Só devolve depois de o
+    combobox exibir o novo rótulo; senão levanta TimeoutException para o
+    chamador tentar de novo. O rótulo varia por tela: 'Todas' no Painel de
+    Suprimentos, 'Todos' no Cadastro de Contratos.
+    """
+    rotulos = (rotulo, *rotulos_alternativos)
+    espera = WebDriverWait(driver, timeout)
+
+    # Overlays que interceptam o clique no rodapé (popover 'Entendi', 'Fechar')
+    for xp in (
+        "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'entendi')]",
+        "//button[@aria-label='Close' or @aria-label='Fechar']",
+    ):
+        for botao in driver.find_elements(By.XPATH, xp):
+            try:
+                if botao.is_displayed():
+                    botao.click()
+                    time.sleep(0.5)
+            except Exception:
+                pass
+
+    # É um div[role=combobox], NÃO um <select>
+    combo_xpath = "//div[@role='combobox' and contains(@class,'MuiTablePagination-select')]"
+    dropdown = espera.until(EC.presence_of_element_located((By.XPATH, combo_xpath)))
+    atual = dropdown.text.strip()
+    if atual in rotulos:
+        adicionar_ao_log(f"Paginação já está em '{atual}'.")
+        return atual
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", dropdown)
+    time.sleep(0.5)
+
+    menu_xpath = "//ul[@role='listbox']"
+    try:
+        ActionChains(driver).move_to_element(dropdown).click().perform()
+    except Exception:
+        pass
+    if not driver.find_elements(By.XPATH, menu_xpath):
+        driver.execute_script("""
+            const el = arguments[0];
+            const o = {bubbles:true, cancelable:true, view:window};
+            ['pointerdown','mousedown','mouseup','click'].forEach(t =>
+                el.dispatchEvent(new MouseEvent(t, o)));
+        """, dropdown)
+    espera.until(EC.presence_of_element_located((By.XPATH, menu_xpath)))
+    time.sleep(0.5)
+
+    # O data-value é dinâmico (= total de linhas), NÃO '-1'.
+    condicao = " or ".join(f"normalize-space(.)='{r}'" for r in rotulos)
+    try:
+        opcao = espera.until(EC.element_to_be_clickable((By.XPATH, f"{menu_xpath}//li[{condicao}]")))
+    except TimeoutException:
+        # 'Todas' fica por último no menu
+        opcao = driver.find_elements(By.XPATH, f"{menu_xpath}//li[@role='option']")[-1]
+    escolhido = opcao.text.strip()
+    ActionChains(driver).move_to_element(opcao).click().perform()
+
+    espera.until(lambda d: d.find_element(By.XPATH, combo_xpath).text.strip() in rotulos)
+    adicionar_ao_log(f"Paginação alterada para '{escolhido}'.")
+    return escolhido
+
+
+# Status do MuiDataGrid (telas novas do Sienge que exportam via 'Gerar Relatório'):
+#  - carregadas: linhas já materializadas no modelo (altura do virtualScroller /
+#    altura de uma linha). Com 'Todas' o grid faz UM fetch longo; até a resposta
+#    chegar a altura fica ~= 1 página;
+#  - total: total exibido no rodapé de paginação ("1–127 de 127");
+#  - carregando: spinner/barra de loading do grid visível.
 _JS_STATUS_DATAGRID = r"""
 const vs = document.querySelector('.MuiDataGrid-virtualScroller');
 const row = document.querySelector('.MuiDataGrid-row');
@@ -519,13 +551,20 @@ const carregando = !!(spinner && spinner.offsetParent !== null);
 return {carregadas: carregadas, total: total, carregando: carregando};
 """
 
-def esperar_datagrid_carregar_todas(driver, timeout=300):
-    """Após selecionar 'Todas' na paginação, o grid busca TODAS as linhas em um
-    único fetch assíncrono. O 'Gerar Relatório' exporta só as linhas já
-    materializadas — exportar antes do fim gera relatório truncado."""
+
+def esperar_datagrid_carregar_todas(driver, timeout=300, estagnado=20):
+    """Após a paginação 'Todas', espera o grid materializar TODAS as linhas.
+
+    Pronto quando o spinner some E as linhas materializadas alcançam o total do
+    rodapé. Se o grid fica parado (sem spinner, contagem inalterada) por
+    `estagnado` segundos abaixo do total, a paginação não pegou: devolve cedo
+    para o chamador tentar de novo em vez de queimar o timeout inteiro (eram
+    300s mortos em 26/2305). Retorna (carregadas, total); o chamador decide.
+    """
     deadline = time.time() + timeout
     carregadas = total = None
     proximo_log = 0.0
+    ultimo_valor, parado_desde = None, time.time()
     while time.time() < deadline:
         try:
             status = driver.execute_script(_JS_STATUS_DATAGRID)
@@ -538,14 +577,47 @@ def esperar_datagrid_carregar_todas(driver, timeout=300):
         if total and carregadas and carregadas >= total * 0.99 and not carregando:
             adicionar_ao_log(f"DataGrid carregou {carregadas}/{total} linhas.")
             return carregadas, total
+        if carregando or carregadas != ultimo_valor:
+            ultimo_valor, parado_desde = carregadas, time.time()
+        elif time.time() - parado_desde >= estagnado:
+            adicionar_ao_log(f"DataGrid parado em {carregadas}/{total} linhas há {estagnado}s sem carregar.")
+            return carregadas, total
         if time.time() >= proximo_log:
             adicionar_ao_log(f"Aguardando DataGrid carregar linhas... {carregadas}/{total} "
                              f"(carregando={carregando})")
             proximo_log = time.time() + 15
         time.sleep(1)
     adicionar_ao_log(f"AVISO: timeout ({timeout}s) esperando o DataGrid "
-                     f"(materializadas={carregadas}, total={total}). Exportação pode sair truncada.")
+                     f"(materializadas={carregadas}, total={total}).")
     return carregadas, total
+
+
+class GridIncompleto(RuntimeError):
+    """O grid não materializou todas as linhas — o export sairia truncado."""
+
+
+def garantir_grid_completo(driver, wait, tentativas=2, timeout=300):
+    """Paginação 25 → 'Todas' e espera real das linhas, com nova tentativa.
+
+    O export do Sienge 9.0.4 é client-side: 'Gerar Relatório' entrega só o que
+    está materializado no grid. Sem esta etapa o arquivo sai com a 1ª página
+    (25 linhas + cabeçalho). Se depois de `tentativas` o grid seguir incompleto,
+    levanta GridIncompleto: o módulo falha explicitamente em vez de o BI receber
+    um relatório truncado com cara de sucesso.
+    """
+    carregadas = total = None
+    for tentativa in range(1, tentativas + 1):
+        try:
+            selecionar_paginacao_todas(driver, wait)
+        except Exception as e:
+            adicionar_ao_log(f"AVISO: falha ao trocar paginação para 'Todas' "
+                             f"(tentativa {tentativa}/{tentativas}): {e}")
+        carregadas, total = esperar_datagrid_carregar_todas(driver, timeout=timeout)
+        if total and carregadas and carregadas >= total * 0.99:
+            return carregadas, total
+        adicionar_ao_log(f"AVISO: grid incompleto ({carregadas}/{total} linhas) "
+                         f"na tentativa {tentativa}/{tentativas}.")
+    raise GridIncompleto(f"grid materializou {carregadas} de {total} linhas — o export sairia truncado")
 
 def esperar_datagrid_pronto(driver, timeout=60):
     """Espera a primeira carga do MuiDataGrid (spinner/overlay ausente).
@@ -874,8 +946,8 @@ def modulo_cadastro_contratos(driver, wait):
     O Sienge trocou esta tela em 2026 (9.0.4): modais de novidade na entrada,
     datas por input[name], painel de colunas novo e export client-side (só as
     linhas materializadas no grid). Fluxo: fechar modais → datas 2000→2050 →
-    mostrar todas as colunas → Consultar → paginação 'Todas' → esperar a grid
-    materializar tudo → Gerar Relatório → excel.
+    mostrar todas as colunas → Consultar → paginação 'Todos' → esperar a grid
+    materializar tudo (ou falhar) → Gerar Relatório → excel.
     """
     adicionar_ao_log("Iniciando extração de Cadastro de Contratos...")
     driver.get("https://guzattizompero.sienge.com.br/sienge/8/index.html#/suprimentos/contratos-e-medicoes/contratos/cadastros")
@@ -893,15 +965,13 @@ def modulo_cadastro_contratos(driver, wait):
 
     btConsultar = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(.)='Consultar' or normalize-space(.)='CONSULTAR']")))
     driver.execute_script("arguments[0].click();", btConsultar)
-    time.sleep(2)
+    esperar_datagrid_pronto(driver)
 
-    # O export sai só com as linhas visíveis — paginação 'Todas' + espera real.
-    try:
-        selecionar_paginacao_todas(driver, wait, rotulo="Todas", rotulos_alternativos=("Todos",))
-        esperar_datagrid_carregar_todas(driver)
-        time.sleep(1)
-    except Exception as e:
-        adicionar_ao_log(f"AVISO: falha ao trocar paginação para 'Todas': {e}")
+    # O export é client-side (só as linhas materializadas): paginação 'Todos' +
+    # espera real, com nova tentativa. Sem completar, o módulo FALHA — antes o
+    # erro virava AVISO e o BI recebia um arquivo com uma página só (26 linhas).
+    garantir_grid_completo(driver, wait)
+    time.sleep(1)
 
     capturar_screenshot(driver, "cadastro_contratos_grid")
 
