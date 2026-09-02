@@ -1296,6 +1296,37 @@ def modulo_painel_suprimentos(driver, wait):
 # -----------------------------------------------------------------------------------------------------------------------------------
 
 
+# Módulos disponíveis: (id, função, nome no log). O id é o que a variável
+# MODULOS e a Central de Automações usam para escolher o que rodar.
+MODULOS = [
+    ("cadastro_contratos", modulo_cadastro_contratos, "Cadastro de Contratos (Suprimentos)"),
+    ("analitico_apropriacoes", modulo_analitico_apropriacoes, "Analítico de Apropriações por Obra (Engenharia)"),
+    ("orcado_comprometido", modulo_orcado_comprometido, "Orçado x Comprometido (Engenharia)"),
+    ("medido_comprometido", modulo_medido_comprometido, "Medido x Comprometido (Engenharia)"),
+    ("apropriacoes_insumos", modulo_apropriacoes_insumos, "Apropriações de Insumos (Engenharia)"),
+    ("pedidos_compra", modulo_pedidos_compra, "Pedidos de Compras (Suprimentos)"),
+    ("relacao_solicitacoes", modulo_relacao_solicitacoes, "Relação de Solicitações (Suprimentos)"),
+    ("painel_suprimentos", modulo_painel_suprimentos, "Painel de Suprimentos (Suprimentos)"),
+]
+
+
+def selecionar_modulos(modulos, selecao):
+    """Filtra `modulos` [(id, funcao, nome)] pela variável de ambiente MODULOS ("a,b").
+
+    Vazia ou ausente = todos. Id desconhecido aborta antes de abrir o navegador,
+    listando os válidos. A ordem é sempre a da lista, não a da seleção.
+    """
+    ids = [s.strip() for s in (selecao or "").split(",") if s.strip()]
+    if not ids:
+        return list(modulos)
+    validos = [m[0] for m in modulos]
+    desconhecidos = [i for i in ids if i not in validos]
+    if desconhecidos:
+        raise ValueError(
+            f"MODULOS desconhecidos: {', '.join(desconhecidos)}. Válidos: {', '.join(validos)}")
+    return [m for m in modulos if m[0] in ids]
+
+
 def main():
     """Roda o login (crítico) e depois cada módulo de forma isolada.
 
@@ -1310,24 +1341,18 @@ def main():
         adicionar_ao_log("===== INICIANDO AUTOMAÇÃO TANGARA ======")
         adicionar_ao_log("========================================")
 
+        selecionados = selecionar_modulos(MODULOS, os.environ.get("MODULOS"))
+        if len(selecionados) != len(MODULOS):
+            adicionar_ao_log(f"MODULOS={os.environ.get('MODULOS')}: executando "
+                             f"{len(selecionados)}/{len(MODULOS)} módulos: "
+                             + ", ".join(m[0] for m in selecionados))
         driver = criar_driver()
         wait = WebDriverWait(driver, 30)
 
         # Login é crítico: sem ele nenhum módulo consegue rodar.
         janela_original = executar_login(driver, wait)
 
-        modulos = [
-            (modulo_cadastro_contratos, "Cadastro de Contratos (Suprimentos)"),
-            (modulo_analitico_apropriacoes, "Analítico de Apropriações por Obra (Engenharia)"),
-            (modulo_orcado_comprometido, "Orçado x Comprometido (Engenharia)"),
-            (modulo_medido_comprometido, "Medido x Comprometido (Engenharia)"),
-            (modulo_apropriacoes_insumos, "Apropriações de Insumos (Engenharia)"),
-            (modulo_pedidos_compra, "Pedidos de Compras (Suprimentos)"),
-            (modulo_relacao_solicitacoes, "Relação de Solicitações (Suprimentos)"),
-            (modulo_painel_suprimentos, "Painel de Suprimentos (Suprimentos)"),
-        ]
-
-        for funcao, nome in modulos:
+        for _modulo_id, funcao, nome in selecionados:
             status = executar_modulo(driver, funcao, nome, wait, janela_original)
             resultados.append((nome, status))
 

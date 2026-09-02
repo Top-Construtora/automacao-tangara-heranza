@@ -6,6 +6,9 @@ services:
     env_file:
       - .env
     environment:
+      # Seleção de módulos vinda da Central (vazio = todos)
+      - MODULOS=${MODULOS:-}
+      - MODULOS=${MODULOS:-}
       # Display virtual para o Chrome
       - DISPLAY=:1
       - PYTHONUNBUFFERED=1
