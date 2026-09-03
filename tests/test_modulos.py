@@ -22,4 +22,4 @@ def test_id_desconhecido_aborta_antes_de_abrir_o_navegador():
 
 
 def test_ids_sao_estaveis_e_batem_com_a_central():
-    assert [m[0] for m in main.MODULOS] == ["cadastro_contratos", "analitico_apropriacoes", "orcado_comprometido", "medido_comprometido", "apropriacoes_insumos", "pedidos_compra", "relacao_solicitacoes", "painel_suprimentos"]
+    assert [m[0] for m in main.MODULOS] == ["cadastro_contratos", "analitico_apropriacoes", "orcado_comprometido", "medido_comprometido", "apropriacoes_insumos", "painel_suprimentos"]

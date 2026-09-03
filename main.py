@@ -1112,85 +1112,6 @@ def modulo_apropriacoes_insumos(driver, wait):
     driver.switch_to.default_content()
 
 
-def modulo_pedidos_compra(driver, wait):
-    """Relação de Pedidos de Compras (Suprimentos)."""
-    adicionar_ao_log("Acessando Relatórios de Suprimentos...")
-    driver.get("https://guzattizompero.sienge.com.br/sienge/8/index.html#/suprimentos/compras/pedidos-de-compra/cadastros")
-    verificar_acesso(driver, "Pedidos de Compras")
-    fechar_popups(driver)
-    fechar_modais_informativos(driver)
-
-    driver.switch_to.default_content()
-
-    data_inicial = wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div/div[4]/main/div[1]/div[2]/div[1]/div/div[2]/div/div/div/div/form/div[1]/div[7]/div/div/input")))
-    data_inicial.click()
-    data_inicial.send_keys(Keys.CONTROL + "a")
-    data_inicial.send_keys("01/01/2000")
-    data_inicial.send_keys(Keys.ENTER)
-
-    data_final = wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div/div[4]/main/div[1]/div[2]/div[1]/div/div[2]/div/div/div/div/form/div[1]/div[8]/div/div/input")))
-    data_final.click()
-    data_final.send_keys(Keys.CONTROL + "a")
-    data_final.send_keys("01/01/2050")
-    data_final.send_keys(Keys.ENTER)
-
-    # Todos os seletores abaixo eram XPaths posicionais que a atualização do SIENGE
-    # invalidou (o do botão 'Colunas' passou a casar com 0 elementos, derrubando o
-    # módulo). Trocados por âncoras semânticas — texto e aria-label da toolbar, que
-    # é idêntica à da tela de Contratos.
-    wait.until(EC.element_to_be_clickable(
-        (By.XPATH, "//button[@aria-label='Exibir seletor de colunas']"))).click()
-
-    try:
-        wait.until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Mostrar/Ocultar Todas']"))).click()
-    except Exception:
-        adicionar_ao_log("Fallback: clicando no input 'Mostrar/Ocultar Todas' diretamente.")
-        mostrar_todas_input = wait.until(EC.presence_of_element_located((By.XPATH, "//input[@name='Mostrar/Ocultar Todas']")))
-        driver.execute_script("arguments[0].click();", mostrar_todas_input)
-
-    # Fecha o popover de colunas antes de seguir, senão ele intercepta os cliques.
-    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-    time.sleep(1)
-
-    # Paginação 25 -> Todas. A espera real das linhas fica para depois do
-    # Consultar: antes dele o grid pode estar vazio (sem total no rodapé) e a
-    # espera giraria o timeout inteiro à toa.
-    selecionar_paginacao_todas(driver, wait, rotulo="Todas", rotulos_alternativos=("Todos",))
-    time.sleep(2)
-
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(.)='Consultar']"))).click()
-    esperar_datagrid_carregar_todas(driver)
-
-    # Gerar Relatório → excel → Exportar (ancorado no diálogo)
-    exportar_excel_mui(driver, wait)
-
-    baixar_relatorio_ou_falhar(driver, "RELAÇÃO DE PEDIDOS DE COMPRAS - TANGARA", SUPRIMENTOS_TANGARA_DIR, wait_time=180)
-
-
-def modulo_relacao_solicitacoes(driver, wait):
-    """Relação de Solicitações (Suprimentos)."""
-    adicionar_ao_log("Acessando Relatório de Solicitações...")
-    driver.get("https://guzattizompero.sienge.com.br/sienge/8/index.html#/common/page/1328")
-    verificar_acesso(driver, "Relação de Solicitações")
-    fechar_popups(driver)
-
-    wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, 'iFramePage')))
-
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//img[@title='Abre a consulta']"))).click()
-    wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "layerFormConsulta")))
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@type='checkbox' and @value='0']"))).click()
-    wait.until(EC.element_to_be_clickable((By.ID, 'pbSelecionar'))).click()
-    driver.switch_to.parent_frame()
-
-    driver.execute_script("document.getElementById('dataInicialSolicitacao').value = '01/01/2000'; document.getElementById('dataFinalSolicitacao').value = '01/01/2050';")
-
-    Select(wait.until(EC.visibility_of_element_located((By.NAME, 'filterRelacao.printCotadosReservas')))).select_by_value("S")
-
-    wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@value='Visualizar']"))).click()
-    baixar_relatorio_ou_falhar(driver, "RELATORIO DE RELACAO DE SOLICITACOES - TANGARA", SUPRIMENTOS_TANGARA_DIR)
-    driver.switch_to.default_content()
-
-
 def modulo_painel_suprimentos(driver, wait):
     """Painel de Suprimentos (Suprimentos)."""
     adicionar_ao_log("Acessando Painel de Suprimentos...")
@@ -1304,8 +1225,6 @@ MODULOS = [
     ("orcado_comprometido", modulo_orcado_comprometido, "Orçado x Comprometido (Engenharia)"),
     ("medido_comprometido", modulo_medido_comprometido, "Medido x Comprometido (Engenharia)"),
     ("apropriacoes_insumos", modulo_apropriacoes_insumos, "Apropriações de Insumos (Engenharia)"),
-    ("pedidos_compra", modulo_pedidos_compra, "Pedidos de Compras (Suprimentos)"),
-    ("relacao_solicitacoes", modulo_relacao_solicitacoes, "Relação de Solicitações (Suprimentos)"),
     ("painel_suprimentos", modulo_painel_suprimentos, "Painel de Suprimentos (Suprimentos)"),
 ]
 
