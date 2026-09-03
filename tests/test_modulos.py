@@ -23,3 +23,9 @@ def test_id_desconhecido_aborta_antes_de_abrir_o_navegador():
 
 def test_ids_sao_estaveis_e_batem_com_a_central():
     assert [m[0] for m in main.MODULOS] == ["cadastro_contratos", "analitico_apropriacoes", "orcado_comprometido", "medido_comprometido", "apropriacoes_insumos", "painel_suprimentos"]
+
+
+def test_hifen_seleciona_nenhum_modulo_para_testar_login():
+    # MODULOS=- : a Central usa para só fazer o login e sair (teste de credenciais).
+    assert main.selecionar_modulos(main.MODULOS, "-") == []
+    assert main.selecionar_modulos(main.MODULOS, " - ") == []

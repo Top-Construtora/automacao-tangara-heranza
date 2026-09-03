@@ -1232,9 +1232,11 @@ MODULOS = [
 def selecionar_modulos(modulos, selecao):
     """Filtra `modulos` [(id, funcao, nome)] pela variável de ambiente MODULOS ("a,b").
 
-    Vazia ou ausente = todos. Id desconhecido aborta antes de abrir o navegador,
+    Vazia ou ausente = todos; "-" = nenhum (só login). Id desconhecido aborta antes de abrir o navegador,
     listando os válidos. A ordem é sempre a da lista, não a da seleção.
     """
+    if (selecao or "").strip() == "-":
+        return []  # MODULOS=- : só faz o login e sai (teste de credenciais pela Central)
     ids = [s.strip() for s in (selecao or "").split(",") if s.strip()]
     if not ids:
         return list(modulos)
@@ -1270,6 +1272,9 @@ def main():
 
         # Login é crítico: sem ele nenhum módulo consegue rodar.
         janela_original = executar_login(driver, wait)
+        if not selecionados:
+            adicionar_ao_log("Login OK. MODULOS=-: nenhum módulo a executar (teste de credenciais).")
+            return
 
         for _modulo_id, funcao, nome in selecionados:
             status = executar_modulo(driver, funcao, nome, wait, janela_original)
