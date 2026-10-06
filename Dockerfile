@@ -68,6 +68,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # Copia arquivos do projeto
 COPY main.py .
+COPY gio_api.py fluxo_desembolso.py ./
 COPY docker-entrypoint.sh /
 RUN chmod +x /docker-entrypoint.sh
 
