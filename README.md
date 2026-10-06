@@ -175,3 +175,17 @@ docker-compose logs --tail=50
 - [ ] Adicionar notificações (email/slack)
 - [ ] Implementar retry automático em caso de falha
 - [ ] Adicionar suporte para múltiplas obras simultâneas
+
+## Envio ao GIO — Fluxo de Desembolso
+
+O módulo `enviar_fluxo_desembolso` (logo depois de `analitico_apropriacoes`) manda o Analítico VENCIMENTO
+ao Acompanhamento Fluxo de Desembolso do GIO, em lotes (`gio_api.py` + `fluxo_desembolso.py`, iguais nos
+5 robôs Sienge). Recusa arquivo com mais de 20 h (o Analítico do dia não rodou). Contrato:
+`docs/integracoes/ingest-fluxo-desembolso.md` no GIO.
+
+Variáveis no `.env`:
+
+| Variável | Valor |
+|---|---|
+| `GIO_INGEST_URL` | `https://zgfbxlnbkaoqtibtbpcx.supabase.co/functions/v1/ingest-fluxo-desembolso` |
+| `GIO_INGEST_KEY` | chave da função (secret `FLUXO_DESEMBOLSO_ROBO_API_KEY` do GIO) |

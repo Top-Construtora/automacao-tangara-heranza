@@ -1217,11 +1217,24 @@ def modulo_painel_suprimentos(driver, wait):
 # -----------------------------------------------------------------------------------------------------------------------------------
 
 
+def modulo_enviar_fluxo_desembolso(driver, wait):
+    """Envia o Analítico de Apropriação VENCIMENTO ao GIO (Acompanhamento Fluxo de Desembolso).
+
+    Roda depois de `analitico_apropriacoes`, que grava o arquivo; não usa o navegador.
+    """
+    # Import tardio: um problema aqui (dependência, .env) derruba só este módulo, não os relatórios.
+    from fluxo_desembolso import enviar_analitico
+    from gio_api import GioApi
+    enviar_analitico(os.path.join(ENGENHARIA_DIR, "Analítico de Apropriações por Obra VENCIMENTO - HERANZA - TANGARA.xlsx"),
+                     "tangara", GioApi.do_ambiente(), log=adicionar_ao_log)
+
+
 # Módulos disponíveis: (id, função, nome no log). O id é o que a variável
 # MODULOS e a Central de Automações usam para escolher o que rodar.
 MODULOS = [
     ("cadastro_contratos", modulo_cadastro_contratos, "Cadastro de Contratos (Suprimentos)"),
     ("analitico_apropriacoes", modulo_analitico_apropriacoes, "Analítico de Apropriações por Obra (Engenharia)"),
+    ("enviar_fluxo_desembolso", modulo_enviar_fluxo_desembolso, "Envio ao GIO — Fluxo de Desembolso"),
     ("orcado_comprometido", modulo_orcado_comprometido, "Orçado x Comprometido (Engenharia)"),
     ("medido_comprometido", modulo_medido_comprometido, "Medido x Comprometido (Engenharia)"),
     ("apropriacoes_insumos", modulo_apropriacoes_insumos, "Apropriações de Insumos (Engenharia)"),
