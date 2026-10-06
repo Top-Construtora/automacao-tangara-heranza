@@ -112,10 +112,25 @@ def test_500_e_rede_tentam_de_novo():
     assert len(sessao.corpos) == 2
     cliente, sessao = api(requests.Timeout(), Resposta(200, {"seq": 1}))
     assert cliente.lote("e-1", 1, []) == {"seq": 1}
-    cliente, _ = api(Resposta(500, {"error": "x"}), Resposta(503, None, "fora"))
+    cliente, _ = api(Resposta(500, {"error": "x"}), Resposta(500, {"error": "x"}), Resposta(503, None, "fora"))
     with pytest.raises(ErroApi, match="503") as erro:
         cliente.lote("e-1", 1, [])
     assert erro.value.status == 503
+
+
+def test_500_tres_vezes_faz_exatamente_3_posts_e_levanta_500():
+    cliente, sessao = api(Resposta(500, {"error": "a"}), Resposta(500, {"error": "b"}), Resposta(500, {"error": "c"}))
+    with pytest.raises(ErroApi) as erro:
+        cliente.lote("e-1", 1, [])
+    assert erro.value.status == 500 and len(sessao.corpos) == 3
+
+
+def test_pausa_entre_tentativas_e_injetada_e_nao_dorme():
+    pausas = []
+    sessao = SessaoFalsa(Resposta(500, {"error": "a"}), Resposta(500, {"error": "b"}), Resposta(200, {"seq": 1}))
+    cliente = GioApi(URL, "chave-secreta", sessao=sessao, pausa=pausas.append)
+    assert cliente.lote("e-1", 1, []) == {"seq": 1}
+    assert pausas == [30, 30]
 
 
 def test_redirecionamento_recusado():
@@ -145,6 +160,33 @@ def test_concluir_500_depois_envio_nao_encontrado_e_sucesso():
     assert cliente.concluir("e-1", 3) == {"concluido_por_reenvio": True}
 
 
+def test_concluir_500_depois_envio_sem_lancamentos_e_sucesso():
+    sem_lancamentos = {"error": "Envio sem lançamentos, expirado ou já concluído."}
+    cliente, _ = api(Resposta(500, {"error": "x"}), Resposta(400, sem_lancamentos))
+    assert cliente.concluir("e-1", 3) == {"concluido_por_reenvio": True}
+
+
+@pytest.mark.parametrize("anteriores", [1, 2])
+def test_concluir_reconhece_o_400_na_2a_ou_3a_tentativa(anteriores):
+    ja = {"error": "Envio sem lançamentos, expirado ou já concluído."}
+    cliente, sessao = api(*[Resposta(500, {"error": "x"})] * anteriores, Resposta(400, ja))
+    assert cliente.concluir("e-1", 3) == {"concluido_por_reenvio": True}
+    assert len(sessao.corpos) == anteriores + 1
+
+
+def test_concluir_sem_lancamentos_de_primeira_e_erro():
+    cliente, _ = api(Resposta(400, {"error": "Envio sem lançamentos, expirado ou já concluído."}))
+    with pytest.raises(ErroApi, match="sem lançamentos"):
+        cliente.concluir("e-1", 3)
+
+
+def test_mensagem_do_servidor_vira_uma_linha_so():
+    cliente, _ = api(Resposta(400, None, "<html>\n<body>erro</body>\n</html>"))
+    with pytest.raises(ErroApi) as erro:
+        cliente.lote("e-1", 1, [])
+    assert "\n" not in str(erro.value) and "<body>erro</body>" in str(erro.value)
+
+
 def test_concluir_envio_nao_encontrado_de_primeira_e_erro():
     cliente, _ = api(Resposta(400, {"error": "Envio não encontrado (expirado ou já concluído)"}))
     with pytest.raises(ErroApi, match="Envio não encontrado"):
@@ -152,7 +194,7 @@ def test_concluir_envio_nao_encontrado_de_primeira_e_erro():
 
 
 def test_lote_nao_herda_a_regra_do_concluir():
-    cliente, _ = api(Resposta(500, {"error": "x"}), Resposta(400, {"error": "Envio não encontrado"}))
+    cliente, _ = api(Resposta(500, {"error": "x"}), Resposta(400, {"error": "Envio não encontrado (expirado ou já concluído)"}))
     with pytest.raises(ErroApi, match="Envio não encontrado"):
         cliente.lote("e-1", 1, [])
 
@@ -170,8 +212,8 @@ def test_conferir_acesso_200_sem_ok_e_erro():
         cliente.conferir_acesso()
 
 
-def test_concluir_500_duas_vezes_e_erro_sem_reenvio():
-    cliente, sessao = api(Resposta(500, {"error": "x"}), Resposta(500, {"error": "y"}))
+def test_concluir_500_tres_vezes_e_erro_sem_reenvio():
+    cliente, sessao = api(Resposta(500, {"error": "x"}), Resposta(500, {"error": "y"}), Resposta(500, {"error": "z"}))
     with pytest.raises(ErroApi) as erro:
         cliente.concluir("e-1", 3)
-    assert erro.value.status == 500 and len(sessao.corpos) == 2
+    assert erro.value.status == 500 and len(sessao.corpos) == 3

@@ -187,6 +187,8 @@ def test_avisa_concluido_por_reenvio(tmp_path):
     resumo = fd.enviar_analitico(caminho, "top", ApiFalsa(fim={"concluido_por_reenvio": True}), log=log.append)
     assert resumo["concluido_por_reenvio"] is True
     assert any("já tinha gravado" in m for m in log)
+    assert not any("obras reconhecidas" in m for m in log)
+    assert any("lote(s)" in m and "lançamentos" in m and "ignoradas" in m for m in log)
 
 
 def test_chaves_do_robo_prevalecem_sobre_as_do_concluir(tmp_path):

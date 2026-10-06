@@ -91,8 +91,11 @@ def enviar_analitico(caminho: str, sienge: str, api, idade_max_h: float | None =
     if fim.get("concluido_por_reenvio"):
         log("AVISO: o 'concluir' não respondeu de primeira e o reenvio achou o envio já fechado: a primeira "
             "chamada já tinha gravado. Conferir o Acompanhamento.")
-    log(f"Fluxo de Desembolso: {total_lotes} lote(s), {lancamentos} lançamentos, {ignoradas} linhas ignoradas, "
-        f"{len(fim.get('obras_reconhecidas') or [])} obras reconhecidas.")
+    resumo_lotes = f"Fluxo de Desembolso: {total_lotes} lote(s), {lancamentos} lançamentos, {ignoradas} linhas ignoradas"
+    if fim.get("concluido_por_reenvio"):
+        log(f"{resumo_lotes}.")  # o reenvio não traz as obras: não dizer "0 obras reconhecidas"
+    else:
+        log(f"{resumo_lotes}, {len(fim.get('obras_reconhecidas') or [])} obras reconhecidas.")
     for chave, rotulo in (("obras_nao_reconhecidas", "obra(s) não reconhecida(s)"),
                           ("obras_em_conflito", "obra(s) em conflito com outro Sienge")):
         obras = fim.get(chave) or []

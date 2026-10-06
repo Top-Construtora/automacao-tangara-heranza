@@ -14,10 +14,12 @@ from urllib.parse import urlsplit
 import requests
 
 TIMEOUT = 120
-TENTATIVAS = 2
-PAUSA_ENTRE_TENTATIVAS = 5
+TENTATIVAS = 3  # a Central não refaz execução em que só este módulo falhou
+PAUSA_ENTRE_TENTATIVAS = 30
 HOSTS_LOCAIS = ("127.0.0.1", "localhost")
-ENVIO_NAO_ENCONTRADO = "Envio não encontrado"
+# Trecho comum às duas mensagens do servidor: "Envio não encontrado (expirado ou já concluído)." e
+# "Envio sem lançamentos, expirado ou já concluído."
+JA_CONCLUIDO = "expirado ou já concluído"
 
 
 class ErroApi(Exception):
@@ -30,8 +32,8 @@ class ErroApi(Exception):
 
 
 def _concluir_ja_gravou(status: int, do_servidor: str) -> bool:
-    """Contrato: 400 'Envio não encontrado' depois de 500/timeout no `concluir` = a 1ª chamada gravou."""
-    return status == 400 and ENVIO_NAO_ENCONTRADO in do_servidor
+    """Contrato: 400 'expirado ou já concluído' depois de 500/timeout no `concluir` = a 1ª chamada gravou."""
+    return status == 400 and JA_CONCLUIDO in do_servidor
 
 
 class GioApi:
@@ -132,5 +134,5 @@ class GioApi:
         except ValueError:
             dados = None
         if isinstance(dados, dict) and dados.get("error"):
-            return str(dados["error"])[:200]
-        return (resposta.text or "").strip()[:200] or "sem mensagem"
+            return " ".join(str(dados["error"]).split())[:200] or "sem mensagem"
+        return " ".join((resposta.text or "").split())[:200] or "sem mensagem"
