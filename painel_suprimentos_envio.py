@@ -22,6 +22,7 @@ except ImportError:  # monolitos: arquivos na raiz
 LINHAS_INICIO = 40     # o `iniciar` recebe as primeiras linhas (cabeçalho incluso)
 TAMANHO_LOTE = 5000    # máximo aceito por `lote`
 IDADE_MAX_H = 20       # mais velho que isso = o Painel do dia não foi exportado
+MIN_LINHAS_DADOS = 100  # menos que isso = export truncado (grade do Sienge que não carregou)
 
 
 class ArquivoVelho(Exception):
@@ -30,6 +31,10 @@ class ArquivoVelho(Exception):
 
 class PlanilhaSemDados(Exception):
     """Nenhuma linha depois do cabeçalho."""
+
+
+class PlanilhaTruncada(PlanilhaSemDados):
+    """Poucas linhas: o Painel de Compras não carregou a grade inteira antes do export."""
 
 
 def api_do_ambiente(env: Mapping[str, str] | None = None) -> GioApi:
@@ -53,9 +58,13 @@ def enviar_painel(caminho: str, sienge: str, api, idade_max_h: float | None = ID
         raise ArquivoVelho(f"O Painel em {caminho} é de {quando} (mais de {idade_max_h} h): o Painel do dia "
                            "não foi exportado; nada enviado ao GIO.")
 
-    api.conferir_acesso()
     linhas = ler_linhas(caminho)
     nome = os.path.basename(caminho)
+    # Antes de chamar o GIO: o export pode sair "com sucesso" só com o cabeçalho ou parte da grade.
+    if len(linhas) - 1 < MIN_LINHAS_DADOS:
+        raise PlanilhaTruncada(f"O Painel em {caminho} ({quando}) tem só {max(len(linhas) - 1, 0)} linhas de dados "
+                               f"(mínimo {MIN_LINHAS_DADOS}): export truncado; nada enviado ao GIO.")
+    api.conferir_acesso()
     log(f"Painel de Suprimentos: {nome} ({quando}), {len(linhas)} linhas lidas; Sienge '{sienge}'.")
 
     inicio = api.iniciar(sienge, nome, linhas[:LINHAS_INICIO])
