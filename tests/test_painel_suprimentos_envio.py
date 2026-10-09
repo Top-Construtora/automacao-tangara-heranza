@@ -36,6 +36,12 @@ class ApiFalsa:
         return self.fim
 
 
+@pytest.fixture(autouse=True)
+def minimo_baixo(monkeypatch):
+    # Planilhas de teste são pequenas; o mínimo real tem teste próprio.
+    monkeypatch.setattr(ps, "MIN_LINHAS_DADOS", 1)
+
+
 def xlsx(tmp_path, linhas, nome="PAINEL DE SUPRIMENTOS - TOP.xlsx"):
     wb = openpyxl.Workbook()
     for linha in linhas:
@@ -86,3 +92,17 @@ def test_concluido_por_reenvio_avisa(tmp_path):
 def test_api_do_ambiente_exige_as_duas_variaveis():
     with pytest.raises(Exception, match="GIO_SUPRIMENTOS_URL"):
         ps.api_do_ambiente({"GIO_SUPRIMENTOS_URL": "https://x"})
+
+
+def test_planilha_truncada_abaixo_do_minimo_nao_envia(tmp_path, monkeypatch):
+    monkeypatch.setattr(ps, "MIN_LINHAS_DADOS", 100)
+    caminho = xlsx(tmp_path, [CAB] + [[str(i), "A", "", 1] for i in range(14)])
+    api = ApiFalsa()
+    with pytest.raises(ps.PlanilhaTruncada, match="14 linhas"):
+        ps.enviar_painel(caminho, "top", api)
+    assert api.chamadas == []  # nem o verificar: nada sai da máquina
+
+
+def test_minimo_padrao_e_100(monkeypatch):
+    monkeypatch.undo()  # desfaz o minimo_baixo
+    assert ps.MIN_LINHAS_DADOS == 100
