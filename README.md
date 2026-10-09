@@ -189,3 +189,18 @@ Variáveis no `.env`:
 |---|---|
 | `GIO_INGEST_URL` | `https://zgfbxlnbkaoqtibtbpcx.supabase.co/functions/v1/ingest-fluxo-desembolso` |
 | `GIO_INGEST_KEY` | chave da função (secret `FLUXO_DESEMBOLSO_ROBO_API_KEY` do GIO) |
+
+## Envio ao GIO — Painel de Suprimentos
+
+O módulo `enviar_painel_suprimentos` (logo depois de `painel_suprimentos`) manda o PAINEL DE SUPRIMENTOS
+ao Painel de Suprimentos do GIO, em lotes (`painel_suprimentos_envio.py`, igual nos 5 robôs Sienge; reaproveita
+`gio_api.py` e a leitura do `fluxo_desembolso.py`). Cada envio substitui os pedidos da empresa no GIO. Recusa
+arquivo com mais de 20 h (o Painel do dia não foi exportado). Contrato: `docs/integracoes/ingest-painel-suprimentos.md`
+no GIO.
+
+Variáveis no `.env` (URL e chave próprias, separadas das do Fluxo de Desembolso):
+
+| Variável | Valor |
+|---|---|
+| `GIO_SUPRIMENTOS_URL` | `https://zgfbxlnbkaoqtibtbpcx.supabase.co/functions/v1/ingest-painel-suprimentos` |
+| `GIO_SUPRIMENTOS_KEY` | chave da função (secret `SUPRIMENTOS_ROBO_API_KEY` do GIO) |

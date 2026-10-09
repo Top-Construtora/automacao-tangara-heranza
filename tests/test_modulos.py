@@ -22,7 +22,7 @@ def test_id_desconhecido_aborta_antes_de_abrir_o_navegador():
 
 
 def test_ids_sao_estaveis_e_batem_com_a_central():
-    assert [m[0] for m in main.MODULOS] == ["cadastro_contratos", "analitico_apropriacoes", "enviar_fluxo_desembolso", "orcado_comprometido", "medido_comprometido", "apropriacoes_insumos", "painel_suprimentos"]
+    assert [m[0] for m in main.MODULOS] == ["cadastro_contratos", "analitico_apropriacoes", "enviar_fluxo_desembolso", "orcado_comprometido", "medido_comprometido", "apropriacoes_insumos", "painel_suprimentos", "enviar_painel_suprimentos"]
 
 
 def test_hifen_seleciona_nenhum_modulo_para_testar_login():
@@ -41,3 +41,14 @@ def test_envio_chama_o_analitico_vencimento_deste_sienge(monkeypatch):
                         lambda caminho, sienge, api, log: chamadas.append((caminho, sienge, api)))
     main.modulo_enviar_fluxo_desembolso(None, None)
     assert chamadas == [(os.path.join(main.ENGENHARIA_DIR, "Analítico de Apropriações por Obra VENCIMENTO - HERANZA - TANGARA.xlsx"), "tangara", "api")]
+
+
+def test_envio_chama_o_painel_de_suprimentos_deste_sienge(monkeypatch):
+    import os
+    import painel_suprimentos_envio
+    chamadas = []
+    monkeypatch.setattr(painel_suprimentos_envio, "api_do_ambiente", lambda: "api")
+    monkeypatch.setattr(painel_suprimentos_envio, "enviar_painel",
+                        lambda caminho, sienge, api, log: chamadas.append((caminho, sienge, api)))
+    main.modulo_enviar_painel_suprimentos(None, None)
+    assert chamadas == [(os.path.join(main.SUPRIMENTOS_TANGARA_DIR, "PAINEL DE SUPRIMENTOS - TANGARA.xlsx"), "tangara", "api")]
