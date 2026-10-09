@@ -1229,6 +1229,17 @@ def modulo_enviar_fluxo_desembolso(driver, wait):
                      "tangara", GioApi.do_ambiente(), log=adicionar_ao_log)
 
 
+def modulo_enviar_painel_suprimentos(driver, wait):
+    """Envia o PAINEL DE SUPRIMENTOS ao GIO (Painel de Suprimentos).
+
+    Roda depois de `painel_suprimentos`, que grava o arquivo; não usa o navegador.
+    """
+    # Import tardio: um problema aqui (dependência, .env) derruba só este módulo, não os relatórios.
+    from painel_suprimentos_envio import api_do_ambiente, enviar_painel
+    enviar_painel(os.path.join(SUPRIMENTOS_TANGARA_DIR, "PAINEL DE SUPRIMENTOS - TANGARA.xlsx"), "tangara", api_do_ambiente(),
+                  log=adicionar_ao_log)
+
+
 # Módulos disponíveis: (id, função, nome no log). O id é o que a variável
 # MODULOS e a Central de Automações usam para escolher o que rodar.
 MODULOS = [
@@ -1239,6 +1250,7 @@ MODULOS = [
     ("medido_comprometido", modulo_medido_comprometido, "Medido x Comprometido (Engenharia)"),
     ("apropriacoes_insumos", modulo_apropriacoes_insumos, "Apropriações de Insumos (Engenharia)"),
     ("painel_suprimentos", modulo_painel_suprimentos, "Painel de Suprimentos (Suprimentos)"),
+    ("enviar_painel_suprimentos", modulo_enviar_painel_suprimentos, "Envio ao GIO — Painel de Suprimentos"),
 ]
 
 
